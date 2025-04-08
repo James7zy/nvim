@@ -15,7 +15,7 @@ end)
 -- 搜索当前光标的单词，精确匹配
 vim.keymap.set("n", "<leader>frb", function()
     local word = vim.fn.expand("<cword>")
-    builtin.grep_string({ search = word })
+    builtin.grep_string({ search = word, word_match = "-w" })
 end)
 
 -- 搜索当前光标的单词，模糊匹配
