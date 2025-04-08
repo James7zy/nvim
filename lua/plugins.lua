@@ -65,6 +65,14 @@ require("lazy").setup({
 		end,
 	},
 
+	-- easymotion find 
+	{
+		'easymotion/vim-easymotion',
+		config = function()
+			require("config.easymotion")
+		end,
+	},
+
 	-- Treesitter-integration
 	{
 		"nvim-treesitter/nvim-treesitter",
