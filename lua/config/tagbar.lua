@@ -1,4 +1,5 @@
 -- 设置 tagbar 子窗口出现在左边
+vim.g.tagbar_position = 'vertical topleft'
 vim.g.tagbar_left = 1
 
 -- 设置标签子窗口的宽度
