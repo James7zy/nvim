@@ -106,20 +106,34 @@ require("aerial").setup({
 	-- This can be a filetype map (see :help aerial-filetype-map)
 	-- To see all available values, see :help SymbolKind
 	filter_kind = {
-		"Class",         -- 类（C++）
-		"Struct",        -- 结构体
-		"Union",         -- 联合体（部分 LSP 会识别）
-		"Enum",          -- 枚举
-		"Function",      -- 函数
-		"Method",        -- 方法（类内函数）
-		"Constructor",   -- 构造函数
-		"Field",         -- 字段（结构体成员）
-		"Variable",      -- 变量（全局变量、静态变量）
-		"Constant",      -- 常量（如 const）
-		"Macro",         -- 宏定义（#define）
-		"Namespace",     -- 命名空间（C++）
-		"Interface",     -- 接口（可能用于某些框架）
-		"Module",        -- 模块（如 C++20 module）	
+		filter_kind = {
+		  c = {
+		    "Struct",     -- 结构体
+		    "Function",   -- 函数
+		    "Macro",      -- 宏定义
+		    "Enum",       -- 枚举
+		    "Union",      -- 联合体
+		    "Variable",   -- 变量
+		    "Constant",   -- 常量
+		    "Field",      -- 结构体字段
+		  },
+		  cpp = {
+		    "Class",       -- 类
+		    "Struct",      -- 结构体
+		    "Function",    -- 函数
+		    "Method",      -- 方法
+		    "Constructor", -- 构造函数
+		    "Enum",        -- 枚举
+		    "Macro",       -- 宏定义
+		    "Namespace",   -- 命名空间
+		    "Variable",    -- 变量
+		    "Field",       -- 字段
+		    "Constant",    -- 常量
+		    "Union",       -- 联合体
+		    "Module",      -- 模块
+		  },
+		  _ = false, -- 其他语言默认显示全部符号
+		}
 	},
 	
 	-- Determines line highlighting mode when multiple splits are visible.
@@ -368,5 +382,19 @@ require("aerial").setup({
 	  update_delay = 300,
 	},
 })
+-- 加载 aerial 的 telescope 扩展
+require("telescope").load_extension("aerial")
+
 -- You probably also want to set a keymap to toggle aerial
-vim.keymap.set("n", "<leader>lt", "<cmd>AerialToggle!<CR>")
+-- vim.keymap.set("n", "<leader>lt", "<cmd>AerialToggle!<CR>")
+
+-- 用 telescope 显示 outline（来自 aerial）
+--vim.keymap.set("n", "<leader>lt", function()
+--  require("telescope").extensions.aerial.aerial()
+--end, { desc = "Telescope Aerial Outline" })
+
+-- 用原生 LSP 的方式查看 outline（可选）
+vim.keymap.set("n", "<leader>lt", function()
+  require("telescope.builtin").lsp_document_symbols()
+end, { desc = "Telescope LSP Outline" })
+

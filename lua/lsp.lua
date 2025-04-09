@@ -63,3 +63,48 @@ lspconfig.pylsp.setup({
 	on_attach = on_attach,
 })
 
+-- clangd 配置
+local mason_registry = require("mason-registry")
+
+local function get_clangd_path()
+    local pkg = mason_registry.get_package("clangd")
+    local install_dir = pkg:get_install_path()
+
+    -- 递归查找 clangd 可执行文件
+    local handle = vim.loop.fs_scandir(install_dir)
+    while handle do
+        local name, typ = vim.loop.fs_scandir_next(handle)
+        if not name then break end
+        if typ == "directory" and name:match("^clangd_") then
+            local clangd_exec = install_dir .. "/" .. name .. "/bin/clangd"
+            if vim.fn.filereadable(clangd_exec) == 1 then
+                return clangd_exec
+            end
+        end
+    end
+
+    -- fallback 路径（旧版本的 mason 路径）
+    local fallback = install_dir .. "/bin/clangd"
+    if vim.fn.filereadable(fallback) == 1 then
+        return fallback
+    end
+
+    vim.notify("[clangd] could not find executable", vim.log.levels.ERROR)
+    return "clangd" -- fallback to system clangd
+end
+
+local clangd_path = get_clangd_path()
+
+lspconfig.clangd.setup({
+    cmd = {
+        clangd_path,
+        "--background-index",
+        "--clang-tidy",
+        "--header-insertion=never",
+        "--all-scopes-completion",
+        "--enable-config",
+        "--completion-style=detailed"
+    },
+    on_attach = on_attach,
+})
+
