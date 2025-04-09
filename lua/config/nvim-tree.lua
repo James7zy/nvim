@@ -112,3 +112,10 @@ nvim_tree.setup({
 	}
 })
 
+vim.keymap.set("n", "<leader>iff", function()
+  require("nvim-tree.api").tree.find_file({ open = true, focus = true })
+end, { desc = "NvimTree: Find current file" })
+
+-- For nvim-tree.lua
+vim.keymap.set("n", "<leader>ifl", ":NvimTreeToggle<CR>", opts)
+
