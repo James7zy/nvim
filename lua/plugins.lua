@@ -65,6 +65,7 @@ require("lazy").setup({
 		end,
 	},
 
+
 	-- easymotion find 
 	{
 		'easymotion/vim-easymotion',
@@ -90,6 +91,17 @@ require("lazy").setup({
 			require("config.nvim-treesitter-textobjects")
 		end,
 	},
+
+	-- aerial
+	{
+		"stevearc/aerial.nvim",
+		opts = {
+		},
+		dependencies = { "nvim-treesitter/nvim-treesitter", "neovim/nvim-lspconfig" },
+		config = function()
+			require("config.aerial")
+		end,
+	 },
 
 	-- Fuzzy finder
 	{
