@@ -103,6 +103,14 @@ require("lazy").setup({
 		end,
 	 },
 
+	-- tagbar 
+	{
+		"preservim/tagbar",
+		config = function()
+			require("config.tagbar")
+		end,
+	},
+
 	-- Fuzzy finder
 	{
 		"nvim-telescope/telescope.nvim",

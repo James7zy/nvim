@@ -394,7 +394,7 @@ require("telescope").load_extension("aerial")
 --end, { desc = "Telescope Aerial Outline" })
 
 -- 用原生 LSP 的方式查看 outline（可选）
-vim.keymap.set("n", "<leader>lt", function()
-  require("telescope.builtin").lsp_document_symbols()
-end, { desc = "Telescope LSP Outline" })
+--vim.keymap.set("n", "<leader>lt", function()
+--  require("telescope.builtin").lsp_document_symbols()
+--end, { desc = "Telescope LSP Outline" })
 
