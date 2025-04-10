@@ -264,6 +264,6 @@ TO DO ...
 
 # [REF]
 
-- https://github.com/yangyangwithgnu/use_vim_as_ide
-- https://martinlwx.github.io/zh-cn/config-neovim-from-scratch/#%E4%B8%BA%E4%BB%80%E4%B9%88%E9%80%89%E6%8B%A9-neovim
+- [use_vim_as_ide](https://github.com/yangyangwithgnu/use_vim_as_ide)
+- [从零开始配置 Neovim(Nvim)](https://martinlwx.github.io/zh-cn/config-neovim-from-scratch/#%E4%B8%BA%E4%BB%80%E4%B9%88%E9%80%89%E6%8B%A9-neovim)
 
