@@ -94,6 +94,8 @@ local function get_clangd_path()
 end
 
 local clangd_path = get_clangd_path()
+local capabilities = require("cmp_nvim_lsp").default_capabilities()
+capabilities.offsetEncoding = { "utf-16" }
 
 lspconfig.clangd.setup({
     cmd = {
@@ -106,5 +108,6 @@ lspconfig.clangd.setup({
         "--completion-style=detailed"
     },
     on_attach = on_attach,
+    capabilities = capabilities,
 })
 

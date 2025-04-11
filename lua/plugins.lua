@@ -166,6 +166,7 @@ require("lazy").setup({
 		end,
 	},
 
+	-- Copilot Nvim
 	{
 		"CopilotC-Nvim/CopilotChat.nvim",
 		dependencies = {
@@ -177,4 +178,34 @@ require("lazy").setup({
 		  -- See Configuration section for options
 		},
 	},
+
+	-- Highlighter
+	{
+		"azabiong/vim-highlighter",
+		config = function()
+			require("config.vim-highlighter")
+		end,
+	},
+
+	{
+		"dhananjaylatkar/cscope_maps.nvim",
+		dependencies = {
+		  "nvim-telescope/telescope.nvim", -- optional [for picker="telescope"]
+		  "ibhagwan/fzf-lua", -- optional [for picker="fzf-lua"]
+		  "echasnovski/mini.pick", -- optional [for picker="mini-pick"]
+		  "folke/snacks.nvim", -- optional [for picker="snacks"]
+		},
+		opts = {
+		  -- USE EMPTY FOR DEFAULT OPTIONS
+		  -- DEFAULTS ARE LISTED BELOW
+		},
+	},
+
+	{
+		"ludovicchabant/vim-gutentags",
+		config = function()
+			require("config.gutentags")
+		end,
+	},
+
 })
