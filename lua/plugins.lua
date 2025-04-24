@@ -200,11 +200,18 @@ require("lazy").setup({
 		  -- DEFAULTS ARE LISTED BELOW
 		},
 	},
-
+	
 	{
 		"ludovicchabant/vim-gutentags",
 		config = function()
 			require("config.gutentags")
+		end,
+	},
+	
+	{
+		"skywind3000/gutentags_plus",
+		config = function()
+			require("config.gutentags_p")
 		end,
 	},
 

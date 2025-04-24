@@ -25,3 +25,5 @@ vim.opt.smartcase = true -- but make it case sensitive if an uppercase is entere
 vim.g.loaded_netrw = 1
 vim.g.loaded_netrwPlugin = 1
 
+vim.env.GTAGSLABEL = "native-pygments"
+vim.env.GTAGSCONF = "/usr/local/share/gtags/gtags.conf"
