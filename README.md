@@ -258,13 +258,22 @@ require('lsp')
 
 ​	重启 `Nvim` 之后，你应该可以在下面的状态栏看到 `Mason` 正在下载并安装前面我们指定的 LSP（**注意此时不能关闭 `Nvim`**），可以输入 `:Mason` 查看安装进度。在你等待安装的过程中，可以输入 `g?` 查看更多帮助信息了解如何使用 `mason` 插件
 
+
 ### **HOWTO Use Clangd in Nvim**
-如何使用LSP在设置的clangd这个工具后，需要配合bear来生成编译文件，clangd根据这个来跳转。
+    如何使用LSP在设置的clangd这个工具后，需要配合bear来生成编译文件，clangd根据这个来跳转。
 ```shell
-Bear is a tool to generate a compile_commands.json file by recording a complete build.
+    Bear is a tool to generate a compile_commands.json file by recording a complete build.
 For a make-based build, you can run make clean; bear -- make to generate the file (and run a clean build!).
 ```
 https://clangd.llvm.org/installation.html#project-setup
+
+Clangd and compile_commands.json
+If it is C repo, the file compile_commands.json is needed for language server 'clangd' to work.
+
+Linux Kernel
+Run 'scripts/clang-tools/gen_compile_commands.py' after kernel compiling. This will generate compile_commands.json in the top directory.
+
+After that, editing c file in the kernel repo will make clangd start to act as a language server.
 
 # [REF]
 
