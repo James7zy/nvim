@@ -1,18 +1,18 @@
 vim.opt.termguicolors = true
 require("bufferline").setup {
     options = {
-        -- 左侧让出 nvim-tree 的位置
+        -- left nvim-tree 
         offsets = {{
             filetype = "NvimTree",
             text = "File Explorer",
             highlight = "Directory",
             text_align = "left"
         }},
-	mode = "buffers", -- 使用 buffer 模式，也支持 "tabs"
-        numbers = "ordinal", -- 显示序号，方便快捷键跳转
-        close_command = "bdelete! %d",       -- 关闭缓冲区
+	mode = "buffers", -- buffer mode
+        numbers = "ordinal", -- show num
+        close_command = "bdelete! %d",       --close buffer 
         right_mouse_command = "bdelete! %d",
-        left_mouse_command = "buffer %d",    -- 左键点击切换
+        left_mouse_command = "buffer %d",    -- click left to close
         middle_mouse_command = nil,
         indicator = {
           icon = '▎', style = 'icon',
@@ -22,8 +22,8 @@ require("bufferline").setup {
         close_icon = '',
         left_trunc_marker = '',
         right_trunc_marker = '',
-        diagnostics = "nvim_lsp", -- 显示 LSP 诊断
-        separator_style = "slant", -- 分隔符样式: "slant" | "thick" | "thin"
+        diagnostics = "nvim_lsp", 
+        separator_style = "slant", -- "slant" | "thick" | "thin"
         show_buffer_close_icons = true,
         show_close_icon = true,
         enforce_regular_tabs = false,
@@ -32,12 +32,12 @@ require("bufferline").setup {
     }
 }
 
--- 快捷键配置
+--keymap 
 local map = vim.keymap.set
-map("n", "<Tab>", "<cmd>BufferLineCycleNext<CR>", { desc = "下一个标签" })
-map("n", "<S-Tab>", "<cmd>BufferLineCyclePrev<CR>", { desc = "上一个标签" })
+map("n", "<Tab>", "<cmd>BufferLineCycleNext<CR>", { desc = "next buffer" })
+map("n", "<S-Tab>", "<cmd>BufferLineCyclePrev<CR>", { desc = "before buffer" })
 
--- 跳转到具体 buffer
+-- jump buffer
 for i = 1, 9 do
-  map("n", "<leader>" .. i, "<cmd>BufferLineGoToBuffer " .. i .. "<CR>", { desc = "跳转到标签 " .. i })
+  map("n", "<leader>" .. i, "<cmd>BufferLineGoToBuffer " .. i .. "<CR>", { desc = "jump buffer" .. i })
 end
