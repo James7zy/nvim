@@ -257,6 +257,7 @@ require('lsp')
 ```
 
 ​	重启 `Nvim` 之后，你应该可以在下面的状态栏看到 `Mason` 正在下载并安装前面我们指定的 LSP（**注意此时不能关闭 `Nvim`**），可以输入 `:Mason` 查看安装进度。在你等待安装的过程中，可以输入 `g?` 查看更多帮助信息了解如何使用 `mason` 插件
+
 ### **HOWTO Use Clangd in Nvim**
 如何使用LSP在设置的clangd这个工具后，需要配合bear来生成编译文件，clangd根据这个来跳转。
 ```shell
