@@ -1,3 +1,5 @@
+local nproc = vim.fn.systemlist("nproc")[1]
+
 require('mason').setup({
     ui = {
         icons = {
@@ -86,16 +88,21 @@ local capabilities = require("cmp_nvim_lsp").default_capabilities()
 capabilities.offsetEncoding = { "utf-16" }
 
 lspconfig.clangd.setup({
-    cmd = {
-        clangd_path,
-        "--background-index",
-        "--clang-tidy",
-        "--header-insertion=never",
-        "--all-scopes-completion",
-        "--enable-config",
-        "--completion-style=detailed"
-    },
-    on_attach = on_attach,
-    capabilities = capabilities,
+	cmd = {
+		clangd_path,
+		"--background-index",
+		"--clang-tidy",
+		"--header-insertion=never",
+		"--all-scopes-completion",
+		"--enable-config",
+		"--completion-style=detailed",
+		"-j=" .. nproc,
+		"--function-arg-placeholders",
+		"--rename-file-limit=0",
+		"--background-index-priority=normal",
+	},
+	on_attach = on_attach,
+	capabilities = capabilities,
+	filetypes = {"c", "cpp", "objc", "objcpp"},
 })
 
