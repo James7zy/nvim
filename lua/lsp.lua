@@ -1,5 +1,3 @@
-local nproc = vim.fn.systemlist("nproc")[1]
-
 require('mason').setup({
     ui = {
         icons = {
@@ -96,7 +94,6 @@ lspconfig.clangd.setup({
 		"--all-scopes-completion",
 		"--enable-config",
 		"--completion-style=detailed",
-		"-j=" .. nproc,
 		"--function-arg-placeholders",
 		"--rename-file-limit=0",
 		"--background-index-priority=normal",
