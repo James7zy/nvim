@@ -1,3 +1,7 @@
+-- open cursorline and cursorcolumn highlights
+vim.opt.cursorline = true
+vim.opt.cursorcolumn = true
+
 -- Default options:
 require('kanagawa').setup({
     compile = false,             -- enable compiling the colorscheme
@@ -26,3 +30,4 @@ require('kanagawa').setup({
 
 -- setup must be called before loading
 vim.cmd("colorscheme kanagawa")
+
