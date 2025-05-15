@@ -37,3 +37,12 @@ vim.keymap.set("v", ">", ">gv", opts)
 -- 4. Press `gsc` to increment selection by scope. (sc = scope)
 -- 5. Press `gsd` to decrement selection. (sd = selection decrement)
 
+--Copilot
+vim.g.copilot_no_tab_map = true
+vim.keymap.set("i", "<M-l>", 'copilot#Accept("\\<CR>")', {
+  expr = true,
+  replace_keycodes = false,
+  silent = true,
+  desc = "Copilot Accept Suggestion"
+})
+
