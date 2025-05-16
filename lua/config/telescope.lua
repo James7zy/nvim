@@ -4,12 +4,12 @@ if not is_ok then
 end
 
 vim.keymap.set("n", "<leader>ff", builtin.find_files, {})
-vim.keymap.set("n", "<leader>fg", builtin.git_files, {})
+vim.keymap.set("n", "<leader>ft", builtin.git_files, {})
 vim.keymap.set("n", "<leader>fb", builtin.buffers, {})
-vim.keymap.set("n", "<leader>flg", builtin.live_grep, {}) -- NOTE: requires ripgrpe
+vim.keymap.set("n", "<leader>fg", builtin.live_grep, {}) -- NOTE: requires ripgrpe
 vim.keymap.set(
 	"n", "<leader>fc", function() -- fc = find by content
-	builtin.grep_string({ search = vim.fn.input("Grep > ") })
+	builtin.grep_string({ search = vim.fn.input("rg > ") })
 end)
 
 -- 搜索当前光标的单词，精确匹配
