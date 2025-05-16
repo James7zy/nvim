@@ -40,9 +40,16 @@ vim.keymap.set("v", ">", ">gv", opts)
 --Copilot
 vim.g.copilot_no_tab_map = true
 vim.keymap.set("i", "<M-l>", 'copilot#Accept("\\<CR>")', {
-  expr = true,
-  replace_keycodes = false,
-  silent = true,
-  desc = "Copilot Accept Suggestion"
+	expr = true,
+	replace_keycodes = false,
+	silent = true,
+	desc = "Copilot Accept Suggestion"
 })
+
+vim.keymap.set("n", "<M-i>", ":CopilotChat<CR>", {
+	noremap = true,
+	silent = true,
+	desc = "Open Copilot Chat"
+})
+
 
