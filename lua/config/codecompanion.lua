@@ -15,10 +15,11 @@ require("codecompanion").setup({
 			    return os.getenv("DEEPSEEK_API_KEY")
 			  end,
 			},
-			schema = {
+			model_opts = {
 			  model = {
 			    default = "deepseek-coder",
 			  },
+			  tool = {},
 			},
 		})
 	end,
@@ -32,7 +33,7 @@ require("codecompanion").setup({
 			    return os.getenv("DEEPSEEK_API_KEY_S")
 			  end,
 			},
-			schema = {
+			model_opts = {
 			  model = {
 			    default = "deepseek-ai/DeepSeek-R1",
 			    choices = {
@@ -53,7 +54,7 @@ require("codecompanion").setup({
 			    return os.getenv("DEEPSEEK_API_KEY_S")
 			  end,
 			},
-			schema = {
+			model_opts = {
 			  model = {
 			    default = "deepseek-ai/DeepSeek-V3",
 			    choices = {
@@ -74,7 +75,7 @@ require("codecompanion").setup({
 			    return os.getenv("DEEPSEEK_API_ALIYUN")
 			  end,
 			},
-			schema = {
+			model_opts = {
 			  model = {
 			    default = "deepseek-r1",
 			    choices = {
@@ -97,7 +98,7 @@ require("codecompanion").setup({
 			  end,
 			  chat_url = "/compatible-mode/v1/chat/completions",
 			},
-			schema = {
+			model_opts = {
 			  model = {
 			    default = "qwen-coder-plus-latest",
 			  },
@@ -108,7 +109,7 @@ require("codecompanion").setup({
 	copilot_claude = function()
 		return require("codecompanion.adapters").extend("copilot", {
 			name = "copilot_claude",
-			schema = {
+			model_opts = {
 			  model = {
 			    default = "claude-3.7-sonnet",
 			  },
@@ -119,7 +120,7 @@ require("codecompanion").setup({
 
 	strategies = {
 		chat = { adapter = "copilot" },
-		inline = { adapter = "copilot" },
+		inline = { adapter = "deepseek" },
 	},
 
 	opts = {
