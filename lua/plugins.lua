@@ -201,14 +201,15 @@ require("lazy").setup({
 
 	{
 		"olimorris/codecompanion.nvim",
+		tag = "v15.12.0",
 		opts = {},
 		dependencies = {
 		  "nvim-lua/plenary.nvim",
 		  "nvim-treesitter/nvim-treesitter",
 		},
 		config = function()
-			require("config.codecompanion")
+			require("config.CodeCompanion")
 		end,
-	}
+	},
 
 })
