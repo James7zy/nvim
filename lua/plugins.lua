@@ -199,6 +199,7 @@ require("lazy").setup({
 		end,
 	},
 
+	--codecompanion
 	{
 		"olimorris/codecompanion.nvim",
 		tag = "v15.12.0",
@@ -206,10 +207,21 @@ require("lazy").setup({
 		dependencies = {
 		  "nvim-lua/plenary.nvim",
 		  "nvim-treesitter/nvim-treesitter",
+		  "j-hui/fidget.nvim"
 		},
+		init = function()
+		  require("config.codecompanion.fidget-spinner"):init()
+		end,
+
 		config = function()
 			require("config.CodeCompanion")
 		end,
 	},
 
+	{
+		"j-hui/fidget.nvim",
+		opts = {
+		  -- options
+		},
+	}
 })

@@ -109,8 +109,8 @@ require("codecompanion").setup({
 	},
 
 	strategies = {
-		chat = { adapter = "deepseek" },
-		inline = { adapter = "copilot_claude" },
+		chat = { adapter = "copilot_claude" },
+		inline = { adapter = "deepseek" },
 	},
 
 	opts = {
@@ -123,4 +123,5 @@ require("codecompanion").setup({
 --	},		
 
 })
+
 
