@@ -224,14 +224,24 @@ require("lazy").setup({
 		lazy = false,
 		version = false, -- set this if you want to always pull the latest change
 		opts = {
-			provider = "deepseek",
+
+			provider = "claude",
 			providers = {
+			  claude = {
+			    endpoint = "https://api.anthropic.com",
+			    model = "claude-sonnet-4-20250514",
+			    timeout = 30000, -- Timeout in milliseconds
+			      extra_request_body = {
+			        temperature = 0.75,
+			        max_tokens = 20480,
+			      },
+			  },
 			  deepseek = {
 			    __inherited_from = "openai",
 			    api_key_name = "DEEPSEEK_API_KEY",
 			    endpoint = "https://api.deepseek.com",
 			    model = "deepseek-coder",
-			    max_tokens = 8192,
+			    max_tokens = 65536,
 			  },
 			},
 		},
@@ -272,6 +282,16 @@ require("lazy").setup({
 				ft = { "markdown", "Avante" },
 			},
 		},
+	},
+
+	{
+		"greggh/claude-code.nvim",
+		dependencies = {
+		  "nvim-lua/plenary.nvim", -- Required for git operations
+		},
+		config = function()
+			require("config.claude")
+		end,
 	},
 
 	{

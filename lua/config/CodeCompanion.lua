@@ -109,7 +109,7 @@ require("codecompanion").setup({
 	},
 
 	strategies = {
-		chat = { adapter = "copilot_claude" },
+		chat = { adapter = "deepseek" },
 		inline = { adapter = "deepseek" },
 	},
 
