@@ -225,10 +225,10 @@ require("lazy").setup({
 		version = false, -- set this if you want to always pull the latest change
 		opts = {
 
-			provider = "claude",
+			provider = "deepseek",
 			providers = {
 			  claude = {
-			    endpoint = "https://api.anthropic.com",
+			    endpoint = "https://litellm.ecarxgroup.com/",
 			    model = "claude-sonnet-4-20250514",
 			    timeout = 30000, -- Timeout in milliseconds
 			      extra_request_body = {
@@ -284,6 +284,7 @@ require("lazy").setup({
 		},
 	},
 
+	-- claude
 	{
 		"greggh/claude-code.nvim",
 		dependencies = {
@@ -292,6 +293,33 @@ require("lazy").setup({
 		config = function()
 			require("config.claude")
 		end,
+	},
+
+	{
+		"tpope/vim-markdown",
+		config = function()
+		  -- tpope/vim-markdown
+		  vim.g.markdown_syntax_conceal = 0
+		  vim.g.markdown_fenced_languages =
+		  { "html", "python", "bash=sh", "json", "java", "js=javascript", "sql", "yaml", "xml",  "Rust",
+		    "swift", "javascript", 'lua' }
+		end,
+	}, --> syntax highlighting and filetype plugins for Markdown
+
+	{
+		"iamcco/markdown-preview.nvim",
+		cmd = { "MarkdownPreviewToggle", "MarkdownPreview", "MarkdownPreviewStop" },
+		build = "cd app && yarn install",
+		init = function()
+		  vim.g.mkdp_filetypes = { "markdown" }
+		end,
+		ft = { "markdown" },
+	},
+
+	{
+		"ellisonleao/glow.nvim",
+		config = true, 
+		cmd = "Glow"
 	},
 
 	{

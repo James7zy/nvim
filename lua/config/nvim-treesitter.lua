@@ -26,6 +26,7 @@ configs.setup({
 		"gitignore",
 		"gomod",
 		"go",
+		"rust",
 		"comment", -- for tags like TODO:, FIXME(user)
 		"diff", -- git diff
 		"markdown_inline",
