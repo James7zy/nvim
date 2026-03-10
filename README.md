@@ -37,7 +37,7 @@ UBUNTU_CODENAME=jammy
    cd neovim
    ```
 
-   - If you want the **stable release**, also run `git checkout stable`.OR`git checkout v0.10.3`目前使用的是V0.10.3
+   - If you want the **stable release**, also run `git checkout stable`.OR`git checkout v0.11.5`目前使用的是V0.11.5
 
 4. ```
    make CMAKE_BUILD_TYPE=RelWithDebInfo
