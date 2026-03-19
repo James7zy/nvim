@@ -169,19 +169,6 @@ require("lazy").setup({
 		end,
 	},
 
-	-- Copilot Nvim
-	{
-		"CopilotC-Nvim/CopilotChat.nvim",
-		dependencies = {
-		  { "github/copilot.vim" }, -- or zbirenbaum/copilot.lua
-		  { "nvim-lua/plenary.nvim", branch = "master" }, -- for curl, log and async functions
-		},
-		build = "make tiktoken", -- Only on MacOS or Linux
-		opts = {
-		  -- See Configuration section for options
-		},
-	},
-
 	-- Highlighter
 	{
 		"azabiong/vim-highlighter",
@@ -199,25 +186,6 @@ require("lazy").setup({
 		},
 		config = function()
 			require("config.bufferline")
-		end,
-	},
-
-	--codecompanion
-	{
-		"olimorris/codecompanion.nvim",
-		tag = "v15.12.0",
-		opts = {},
-		dependencies = {
-		  "nvim-lua/plenary.nvim",
-		  "nvim-treesitter/nvim-treesitter",
-		  "j-hui/fidget.nvim"
-		},
-		init = function()
-		  require("config.codecompanion.fidget-spinner"):init()
-		end,
-
-		config = function()
-			require("config.CodeCompanion")
 		end,
 	},
 
@@ -299,30 +267,8 @@ require("lazy").setup({
 	},
 
 	{
-		"tpope/vim-markdown",
-		config = function()
-		  -- tpope/vim-markdown
-		  vim.g.markdown_syntax_conceal = 0
-		  vim.g.markdown_fenced_languages =
-		  { "html", "python", "bash=sh", "json", "java", "js=javascript", "sql", "yaml", "xml",  "Rust",
-		    "swift", "javascript", 'lua' }
-		end,
-	}, --> syntax highlighting and filetype plugins for Markdown
-
-	{
-		"iamcco/markdown-preview.nvim",
-		cmd = { "MarkdownPreviewToggle", "MarkdownPreview", "MarkdownPreviewStop" },
-		build = "cd app && yarn install",
-		init = function()
-		  vim.g.mkdp_filetypes = { "markdown" }
-		end,
-		ft = { "markdown" },
-	},
-
-	{
-		"ellisonleao/glow.nvim",
-		config = true, 
-		cmd = "Glow"
+	  "rust-lang/rust.vim",
+	  ft = { "rust", "markdown" },   -- 在 Rust 和 Markdown 文件中加载
 	},
 
 	{
