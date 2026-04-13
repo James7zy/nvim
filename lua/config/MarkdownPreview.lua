@@ -21,13 +21,13 @@ vim.g.mkdp_command_for_global = 0
 -- set to 1, the preview server is available to others in your network.
 -- By default, the server listens on localhost (127.0.0.1)
 -- default: 0
-vim.g.mkdp_open_to_the_world = 0
+vim.g.mkdp_open_to_the_world = 1
 
 -- use custom IP to open preview page.
 -- Useful when you work in remote Vim and preview on local browser.
 -- For more details see: https://github.com/iamcco/markdown-preview.nvim/pull/9
 -- default empty
-vim.g.mkdp_open_ip = ""
+vim.g.mkdp_open_ip = "192.168.115.99"
 
 -- specify browser to open preview page
 -- for path with space
@@ -38,7 +38,7 @@ vim.g.mkdp_browser = ""
 
 -- set to 1, echo preview page URL in command line when opening preview page
 -- default is 0
-vim.g.mkdp_echo_preview_url = 0
+vim.g.mkdp_echo_preview_url = 1
 
 -- a custom Vim function name to open preview page
 -- this function will receive URL as param
