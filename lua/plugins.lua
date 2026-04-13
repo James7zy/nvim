@@ -266,6 +266,28 @@ require("lazy").setup({
 		end,
 	},
 
+	-- Markdown
+	{
+               "tpope/vim-markdown",
+               config = function()
+                 -- tpope/vim-markdown
+                 vim.g.markdown_syntax_conceal = 0
+                 vim.g.markdown_fenced_languages =
+                 { "html", "python", "bash=sh", "json", "java", "js=javascript", "sql", "yaml", "xml",  "Rust",
+                   "swift", "javascript", 'lua' }
+               end,
+       }, --> syntax highlighting and filetype plugins for Markdown
+
+	{
+		"iamcco/markdown-preview.nvim",
+		cmd = { "MarkdownPreviewToggle", "MarkdownPreview", "MarkdownPreviewStop" },
+		build = "cd app && yarn install",
+		init = function()
+		  vim.g.mkdp_filetypes = { "markdown" }
+		end,
+		ft = { "markdown" },
+	},
+
 	{
 	  "rust-lang/rust.vim",
 	  ft = { "rust", "markdown" },   -- 在 Rust 和 Markdown 文件中加载
