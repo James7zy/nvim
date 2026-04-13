@@ -273,7 +273,7 @@ require("lazy").setup({
                  -- tpope/vim-markdown
                  vim.g.markdown_syntax_conceal = 0
                  vim.g.markdown_fenced_languages =
-                 { "html", "python", "bash=sh", "json", "java", "js=javascript", "sql", "yaml", "xml",  "Rust",
+                 { "html", "python", "bash=sh", "json", "java", "js=javascript", "sql", "yaml", "xml", 
                    "swift", "javascript", 'lua' }
                end,
        }, --> syntax highlighting and filetype plugins for Markdown
@@ -284,6 +284,7 @@ require("lazy").setup({
 		build = "cd app && yarn install",
 		init = function()
 		  vim.g.mkdp_filetypes = { "markdown" }
+		  require("config.MarkdownPreview")
 		end,
 		ft = { "markdown" },
 	},
