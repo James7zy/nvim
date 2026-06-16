@@ -275,6 +275,9 @@ Run 'scripts/clang-tools/gen_compile_commands.py' after kernel compiling. This w
 
 After that, editing c file in the kernel repo will make clangd start to act as a language server.
 
+# CLAUDE
+将claude文件下的配置文件放入~/.claude目录下
+
 # [REF]
 
 - [use_vim_as_ide](https://github.com/yangyangwithgnu/use_vim_as_ide)

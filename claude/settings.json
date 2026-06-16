@@ -1,0 +1,21 @@
+{
+  "model": "haiku",
+  "statusLine": {
+    "type": "command",
+    "command": "bash /home/ubuntu/.claude/statusline-command.sh"
+  },
+  "enabledPlugins": {
+    "superpowers@superpowers-marketplace": true
+  },
+  "extraKnownMarketplaces": {
+    "superpowers-marketplace": {
+      "source": {
+        "source": "github",
+        "repo": "obra/superpowers-marketplace"
+      }
+    }
+  },
+  "alwaysThinkingEnabled": false,
+  "theme": "dark",
+  "editorMode": "vim"
+}
