@@ -1,3 +1,9 @@
+return {
+  "nvim-tree/nvim-tree.lua",
+  dependencies = {
+    "nvim-tree/nvim-web-devicons",
+  },
+  config = function()
 local is_ok, nvim_tree = pcall(require, "nvim-tree")
 if not is_ok then
 	return
@@ -119,3 +125,5 @@ end, { desc = "NvimTree: Find current file" })
 -- For nvim-tree.lua
 vim.keymap.set("n", "<leader>ifl", ":NvimTreeToggle<CR>", opts)
 
+  end,
+}
