@@ -1,0 +1,193 @@
+return {
+  -- Treesitter
+  {
+    "nvim-treesitter/nvim-treesitter",
+    build = ":TSUpdate",
+    config = function()
+      local is_ok, configs = pcall(require, "nvim-treesitter.configs")
+      if not is_ok then
+        return
+      end
+
+      configs.setup({
+        -- A list of parser names, or "all" (the four listed parsers should always be installed)
+        ensure_installed = {
+          "c",
+          "lua",
+          "vim",
+          "yaml",
+          "toml",
+          "scheme",
+          "scala",
+          "rust",
+          "python",
+          "ocaml",
+          "make",
+          "json",
+          "llvm",
+          "dockerfile",
+          "git_rebase",
+          "gitcommit",
+          "gitattributes",
+          "gitignore",
+          "gomod",
+          "go",
+          "rust",
+          "comment", -- for tags like TODO:, FIXME(user)
+          "diff", -- git diff
+          "markdown_inline",
+        },
+        -- Install parsers synchronously (only applied to `ensure_installed`)
+        sync_install = false,
+        -- Automatically install missing parsers when entering the buffer
+        -- Recommendation: set to false if you don't have `tree-sitter` CLI installed locally
+        auto_install = true,
+        -- List of parsers to ignore installing (for "all")
+        ignore_install = { "javascript" },
+        -- If you need to change the installation directory of the parsers (see -> Advanced Setup)
+        -- parser_install_dir = "/some/path/to/store/parsers",
+        -- Remember to run vim.opt.runtimepath:append("/some/path/to/store/parsers")!
+
+        highlight = {
+          -- Should we enable this module for all supported languages?
+          enable = true,
+
+          -- NOTE: these are the names of the parsers and not the filetype. (for example, if you want to
+          -- disable highlighting for the `tex` filetype, you need to include `latex` in this list as this is
+          -- the name of the parser)
+          -- If you want to disable the module for some languages you can pass a list to the `disable` option.
+          disable = { "c", "rust" },
+          -- Or use a function for more flexibility, e.g. to disable slow tree-sitter highlight for large files
+          -- disable = function(lang, buf)
+          --     local max_filesize = 100 * 1024 -- 100 KB
+          --     local ok, stats = pcall(vim.loop.fs_stat, vim.api.nvim_buf_get_name(buf))
+          --     if ok and stats and stats.size > max_filesize then
+          --         return true
+          --     end
+          -- end,
+
+          -- Setting this to true will run `:h syntax` and tree-sitter at the same time.
+          -- Set this to `true` if you depend on 'syntax' being enabled (like for indentation).
+          -- Using this option may slow down your editor, and you may see some duplicate highlights.
+          -- Instead of true it can also be a list of languages
+          additional_vim_regex_highlighting = false,
+        },
+        -- Indentation based on treesitter for the = operator. NOTE: This is an experimental feature.
+        -- indent = {
+        --     enable = true
+        -- },
+        incremental_selection = {
+          enable = true,
+          -- init_selection: in normal mode, start incremental selection.
+          -- node_incremental: in visual mode, increment to the upper named parent.
+          -- scope_incremental: in visual mode, increment to the upper scope
+          -- node_decremental: in visual mode, decrement to the previous named node.
+          keymaps = {
+            init_selection = "gss",
+            node_incremental = "gsi",
+            scope_incremental = "gsc",
+            node_decremental = "gsd",
+          },
+        },
+      })
+
+      -- Hints:
+      --   A uppercase letter followed `z` means recursive
+      --   zo: open one fold under the cursor
+      --   zc: close one fold under the cursor
+      --   za: toggle the folding
+      --   zv: open just enough folds to make the line in which the cursor is located not folded
+      --   zM: close all foldings
+      --   zR: open all foldings
+      -- source: https://github.com/nvim-treesitter/nvim-treesitter/wiki/Installation
+      vim.api.nvim_create_autocmd({ "BufEnter", "BufAdd", "BufNew", "BufNewFile", "BufWinEnter" }, {
+        group = vim.api.nvim_create_augroup("TS_FOLD_WORKAROUND", {}),
+        callback = function()
+          vim.opt.foldmethod = "expr"
+          vim.opt.foldexpr = "nvim_treesitter#foldexpr()"
+          vim.opt.foldenable = false
+        end,
+      })
+    end,
+  },
+
+  -- Treesitter text objects
+  {
+    "nvim-treesitter/nvim-treesitter-textobjects",
+    dependencies = "nvim-treesitter/nvim-treesitter",
+    config = function()
+      local is_ok, configs = pcall(require, "nvim-treesitter.configs")
+      if not is_ok then
+        return
+      end
+
+      configs.setup({
+        textobjects = {
+          select = {
+            enable = true,
+
+            -- Automatically jump forward to textobj, similar to targets.vim
+            lookahead = true,
+
+            keymaps = {
+              -- outer: outer part
+              -- inner: inner part
+              ["af"] = "@function.outer",
+              ["if"] = "@function.inner",
+              ["ac"] = "@class.outer",
+              ["ic"] = "@class.inner",
+              ["al"] = "@loop.outer",
+              ["il"] = "@loop.inner",
+            },
+            -- If you set this to `true` (default is `false`) then any textobject is
+            -- extended to include preceding or succeeding whitespace. Succeeding
+            -- whitespace has priority in order to act similarly to eg the built-in
+            -- `ap`.
+            --
+            -- Can also be a function which gets passed a table with the keys
+            -- * query_string: eg '@function.inner'
+            -- * selection_mode: eg 'v'
+            -- and should return true or false
+            include_surrounding_whitespace = true,
+          },
+        },
+        move = {
+          enable = true,
+          set_jumps = true, -- whether to set jumps in the jumplist
+          goto_next_start = {
+            ["]m"] = "@function.outer",
+            ["]]"] = { query = "@class.outer", desc = "Next class start" },
+            --
+            -- You can use regex matching (i.e. lua pattern) and/or pass a list in a "query" key to group multiple queries.
+            ["]o"] = "@loop.*", -- that is, ["]o"] = { query = { "@loop.inner", "@loop.outer" } }
+
+            -- You can pass a query group to use query from `queries/<lang>/<query_group>.scm file in your runtime path.
+            -- Below example nvim-treesitter's `locals.scm` and `folds.scm`. They also provide highlights.scm and indent.scm.
+            ["]z"] = { query = "@fold", query_group = "folds", desc = "Next fold" },
+          },
+          goto_next_end = {
+            ["]M"] = "@function.outer",
+            ["]["] = "@class.outer",
+          },
+          goto_previous_start = {
+            ["[m"] = "@function.outer",
+            ["[["] = "@class.outer",
+          },
+          goto_previous_end = {
+            ["[M"] = "@function.outer",
+            ["[]"] = "@class.outer",
+          },
+          -- Below will go to either the start or the end, whichever is closer.
+          -- Use if you want more granular movements
+          -- Make it even more gradual by adding multiple queries and regex.
+          goto_next = {
+            ["]d"] = "@conditional.outer",
+          },
+          goto_previous = {
+            ["[d"] = "@conditional.outer",
+          },
+        },
+      })
+    end,
+  },
+}
