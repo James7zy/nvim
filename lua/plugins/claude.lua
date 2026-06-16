@@ -1,70 +1,91 @@
 return {
-  "greggh/claude-code.nvim",
-  dependencies = {
-    "nvim-lua/plenary.nvim",
-  },
-  config = function()
+  "coder/claudecode.nvim",
+  dependencies = { "folke/snacks.nvim" },
+  opts = {
+    -- Server Configuration
+    port_range = { min = 10000, max = 65535 },
+    auto_start = true,
+    log_level = "info", -- "trace", "debug", "info", "warn", "error"
+    terminal_cmd = nil, -- Custom terminal command (default: "claude")
+    -- For local installations: "~/.claude/local/claude"
+    -- For native binary: use output from 'which claude'
 
-require("claude-code").setup({
-  -- Terminal window settings
-  window = {
-    split_ratio = 0.6,      -- Percentage of screen for the terminal window (height for horizontal, width for vertical splits)
-    position = "vertical",  -- Position of the window: "botright", "topleft", "vertical", "float", etc.
-    enter_insert = true,    -- Whether to enter insert mode when opening Claude Code
-    hide_numbers = true,    -- Hide line numbers in the terminal window
-    hide_signcolumn = true, -- Hide the sign column in the terminal window
+    -- Send/Focus Behavior
+    -- When true, successful sends focus the in-editor Claude terminal if already
+    -- connected. NOTE: this only works for in-editor providers (snacks/native);
+    -- it has no effect with provider = "none"/"external" (Claude runs outside
+    -- Neovim). For those, hook the `User ClaudeCodeSendComplete` event.
+    focus_after_send = false,
 
-    -- Floating window configuration (only applies when position = "float")
-    float = {
-      width = "80%",        -- Width: number of columns or percentage string
-      height = "80%",       -- Height: number of rows or percentage string
-      row = "center",       -- Row position: number, "center", or percentage string
-      col = "center",       -- Column position: number, "center", or percentage string
-      relative = "editor",  -- Relative to: "editor" or "cursor"
-      border = "rounded",   -- Border style: "none", "single", "double", "rounded", "solid", "shadow"
-    },
-  },
-  -- File refresh settings
-  refresh = {
-    enable = true,           -- Enable file change detection
-    updatetime = 100,        -- updatetime when Claude Code is active (milliseconds)
-    timer_interval = 1000,   -- How often to check for file changes (milliseconds)
-    show_notifications = true, -- Show notification when files are reloaded
-  },
-  -- Git project settings
-  git = {
-    use_git_root = true,     -- Set CWD to git root when opening Claude Code (if in git project)
-  },
-  -- Shell-specific settings
-  shell = {
-    separator = '&&',        -- Command separator used in shell commands
-    pushd_cmd = 'pushd',     -- Command to push directory onto stack (e.g., 'pushd' for bash/zsh, 'enter' for nushell)
-    popd_cmd = 'popd',       -- Command to pop directory from stack (e.g., 'popd' for bash/zsh, 'exit' for nushell)
-  },
-  -- Command settings
-  command = "claude",        -- Command used to launch Claude Code
-  -- Command variants
-  command_variants = {
-    -- Conversation management
-    continue = "--continue", -- Resume the most recent conversation
-    resume = "--resume",     -- Display an interactive conversation picker
+    -- Selection Tracking
+    track_selection = true,
+    visual_demotion_delay_ms = 50,
 
-    -- Output options
-    verbose = "--verbose",   -- Enable verbose logging with full turn-by-turn output
-  },
-  -- Keymaps
-  keymaps = {
-    toggle = {
-      normal = "<C-,>",       -- Normal mode keymap for toggling Claude Code, false to disable
-      terminal = "<C-,>",     -- Terminal mode keymap for toggling Claude Code, false to disable
-      variants = {
-        continue = "<leader>cC", -- Normal mode keymap for Claude Code with continue flag
-        verbose = "<leader>cV",  -- Normal mode keymap for Claude Code with verbose flag
+    -- Terminal Configuration
+    terminal = {
+      split_side = "right", -- "left" or "right"
+      split_width_percentage = 0.60,
+      -- Optional: shrink (or widen) the terminal while a diff is open. Defaults to
+      -- split_width_percentage when unset, preserving today's behavior.
+      diff_split_width_percentage = nil, -- e.g. 0.20 to give diffs more room
+      provider = "auto", -- "auto", "snacks", "native", "external", "none", or custom provider table
+      auto_close = true,
+      snacks_win_opts = {}, -- Opts to pass to `Snacks.terminal.open()`
+      -- Work around a Neovim core bug (< 0.12.2) that fragments large pastes into
+      -- the terminal, making Cmd+V appear to truncate. true | false | "auto"
+      -- ("auto", the default, enables it only on affected Neovim versions).
+      fix_streamed_paste = "auto",
+
+      -- Provider-specific options
+      provider_opts = {
+        -- Command for external terminal provider. Can be:
+        -- 1. String with %s placeholder: "alacritty -e %s"
+        -- 2. String with two %s placeholders: "alacritty --working-directory %s -e %s" (cwd, command)
+        -- 3. Function returning command: function(cmd, env) return "alacritty -e " .. cmd end
+        external_terminal_cmd = nil,
       },
     },
-    window_navigation = true, -- Enable window navigation keymaps (<C-h/j/k/l>)
-    scrolling = true,         -- Enable scrolling keymaps (<C-f/b>) for page up/down
-  }
-})
-  end,
+
+    -- Diff Integration
+    diff_opts = {
+      layout = "vertical", -- "vertical" or "horizontal"
+      open_in_new_tab = false,
+      keep_terminal_focus = false, -- If true, moves focus back to terminal after diff opens
+      hide_terminal_in_new_tab = false,
+      auto_resize_terminal = true, -- Let the plugin manage the terminal width across the diff lifecycle
+      -- on_new_file_reject = "keep_empty", -- "keep_empty" or "close_window"
+
+      -- Legacy aliases (still supported):
+      -- vertical_split = true,
+      -- open_in_current_tab = true,
+    },
+  },
+  cmd = {
+    "ClaudeCode",
+    "ClaudeCodeFocus",
+    "ClaudeCodeSelectModel",
+    "ClaudeCodeAdd",
+    "ClaudeCodeSend",
+    "ClaudeCodeTreeAdd",
+    "ClaudeCodeStatus",
+    "ClaudeCodeStart",
+    "ClaudeCodeStop",
+    "ClaudeCodeOpen",
+    "ClaudeCodeClose",
+    "ClaudeCodeDiffAccept",
+    "ClaudeCodeDiffDeny",
+    "ClaudeCodeCloseAllDiffs",
+  },
+  keys = {
+    { "<leader>a", nil, desc = "AI/Claude Code" },
+    { "<leader>ac", "<cmd>ClaudeCode<cr>", desc = "Toggle Claude" },
+    { "<leader>af", "<cmd>ClaudeCodeFocus<cr>", desc = "Focus Claude" },
+    { "<leader>ar", "<cmd>ClaudeCode --resume<cr>", desc = "Resume Claude" },
+    { "<leader>aC", "<cmd>ClaudeCode --continue<cr>", desc = "Continue Claude" },
+    { "<leader>am", "<cmd>ClaudeCodeSelectModel<cr>", desc = "Select Claude model" },
+    { "<leader>ab", "<cmd>ClaudeCodeAdd %<cr>", desc = "Add current buffer" },
+    { "<leader>as", "<cmd>ClaudeCodeSend<cr>", mode = "v", desc = "Send to Claude" },
+    { "<leader>aa", "<cmd>ClaudeCodeDiffAccept<cr>", desc = "Accept diff" },
+    { "<leader>ad", "<cmd>ClaudeCodeDiffDeny<cr>", desc = "Deny diff" },
+  },
 }

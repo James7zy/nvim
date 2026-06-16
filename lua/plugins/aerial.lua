@@ -1,5 +1,6 @@
 return {
   "stevearc/aerial.nvim",
+  branch = "nvim-0.x", -- master requires Neovim 0.12+; this branch supports 0.11 and older
   dependencies = { "nvim-treesitter/nvim-treesitter", "neovim/nvim-lspconfig" },
   config = function()
 -- Call the setup function to change the default behavior
