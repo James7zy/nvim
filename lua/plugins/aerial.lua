@@ -1,3 +1,7 @@
+return {
+  "stevearc/aerial.nvim",
+  dependencies = { "nvim-treesitter/nvim-treesitter", "neovim/nvim-lspconfig" },
+  config = function()
 -- Call the setup function to change the default behavior
 require("aerial").setup({
 	-- optionally use on_attach to set keymaps when aerial has attached to a buffer
@@ -397,4 +401,6 @@ require("telescope").load_extension("aerial")
 --vim.keymap.set("n", "<leader>lt", function()
 --  require("telescope.builtin").lsp_document_symbols()
 --end, { desc = "Telescope LSP Outline" })
+  end,
+}
 
