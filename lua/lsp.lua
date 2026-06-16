@@ -12,7 +12,7 @@ require('mason').setup({
 })
 
 require('mason-lspconfig').setup({
-    ensure_installed = { 'lua_ls', 'clangd', 'pylsp' },
+    ensure_installed = { 'lua_ls', 'pylsp' },
     automatic_installation = true,
 })
 
@@ -66,7 +66,7 @@ local function get_clangd_path()
     end
 end
 
-local clangd_path = get_clangd_path()
+local clangd_path = { "/usr/bin/clangd" }
 
 -- =========================================
 -- Capabilities (for nvim-cmp completion)
