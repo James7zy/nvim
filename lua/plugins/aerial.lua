@@ -390,8 +390,8 @@ require("aerial").setup({
 -- 加载 aerial 的 telescope 扩展
 require("telescope").load_extension("aerial")
 
--- You probably also want to set a keymap to toggle aerial
--- vim.keymap.set("n", "<leader>lt", "<cmd>AerialToggle!<CR>")
+-- 切换符号大纲侧边栏（沿用原 tagbar 的 <leader>ilt 绑定）
+vim.keymap.set("n", "<leader>ilt", "<cmd>AerialToggle!<CR>", { desc = "Toggle Aerial Outline" })
 
 -- 用 telescope 显示 outline（来自 aerial）
 --vim.keymap.set("n", "<leader>lt", function()
