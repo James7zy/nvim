@@ -70,16 +70,15 @@ UBUNTU_CODENAME=jammy
 ├── init.lua                # 入口：mapleader → lazy.nvim 引导 → require options/keymaps → lazy.setup("plugins")
 ├── lua
 │   ├── options.lua         # vim 选项
-│   ├── keymaps.lua         # 全局按键映射（含 Copilot 等无独立插件 spec 的快捷键）
+│   ├── keymaps.lua         # 全局按键映射
 │   └── plugins/            # 插件目录，lazy.nvim 通过 import 自动加载本目录下每个文件
 │       ├── colorscheme.lua # kanagawa 主题
 │       ├── lsp.lua         # mason + mason-lspconfig + nvim-lspconfig（Neovim 0.11 写法）
 │       ├── cmp.lua         # nvim-cmp + lspkind + LuaSnip + cmp-* 依赖
 │       ├── treesitter.lua  # nvim-treesitter + treesitter-textobjects
-│       ├── telescope.lua   # 模糊查找
+│       ├── telescope.lua   # 模糊查找（find_files 自适应用 fd/fdfind）
 │       ├── nvim-tree.lua   # 文件树
-│       ├── aerial.lua      # 代码大纲
-│       ├── tagbar.lua      # 基于标签的标识符列表
+│       ├── aerial.lua      # 代码大纲（符号大纲，已取代 tagbar）
 │       ├── gtags.lua       # cscope/gtags 符号跳转（cscope_maps.nvim）
 │       ├── trouble.lua     # 诊断/引用列表
 │       ├── bufferline.lua  # 顶部 buffer 标签栏
@@ -179,39 +178,13 @@ return {
 
 ​	通过 ctags 这类标签系统在一定程度上助力 vim 理解我们的代码，对于 C 语言这类简单语言来说，差不多也够了。近几年，随着 C++11/14 的推出，诸如类型推导、lamda 表达式、模版等等新特性，标签系统显得有心无力，这个星球最了解代码的工具非编译器莫属，如果编译器能在语义这个高度帮助 vim 理解代码，那么我们需要的各项 IDE 功能肯定能达到另一个高度。
 
-语义系统，编译器必不可少。GCC 和 clang 两大主流 C/C++ 编译器，作为语义系统的支撑工具，我选择后者，除了 clang 对新标准支持及时、错误诊断信息清晰这些优点之外，更重要的是，它在高内聚、低耦合方面做得非常好，各类插件可以调用 libclang 获取非常完整的代码分析结果，从而轻松且优雅地实现高阶 IDE 功能。你对语义系统肯定还是比较懵懂，紧接着的“基于语义的声明/定义跳转”会让你有更为直观的了解，现在，请跳转至“7.1 编译器/构建工具集成”，一是了解 clang 相较 GCC 的优势，二是安装好最新版 clang 及其标准库，之后再回来。
+语义系统，编译器必不可少。GCC 和 clang 两大主流 C/C++ 编译器，作为语义系统的支撑工具，我选择后者，除了 clang 对新标准支持及时、错误诊断信息清晰这些优点之外，更重要的是，它在高内聚、低耦合方面做得非常好，各类插件可以调用 libclang 获取非常完整的代码分析结果，从而轻松且优雅地实现高阶 IDE 功能。你对语义系统肯定还是比较懵懂，紧接着的“基于语义的声明/定义跳转”会让你有更为直观的了解。clangd（clang 的 LSP 实现）及其标准库的安装见「7.1 clangd（语义系统核心）」。
 
-### 基于标签的标识符列表
+### 代码大纲（符号列表）
 
-在阅读代码时，经常分析指定函数实现细节，我希望有个插件能把从当前代码文件中提取出的所有标识符放在一个侧边子窗口中，并且能能按语法规则将标识符进行归类，tagbar （https://github.com/majutsushi/tagbar ）是一款基于标签的标识符列表插件，它自动周期性调用 ctags 获取标签信息（仅保留在内存，不落地成文件）。安装完 tagbar 后，
+在阅读代码时，经常分析指定函数实现细节，我希望有个插件能把从当前代码文件中提取出的所有标识符放在一个侧边子窗口中，并且能按语法规则将标识符进行归类。早先用的是基于 ctags 的 tagbar，**现已移除** —— 它与 [aerial.nvim](https://github.com/stevearc/aerial.nvim) 功能完全重复，而 aerial 更现代：直接复用 treesitter / LSP 的符号信息，无需外部 ctags，且已针对 C/C++ 在 `filter_kind` 里做了归类配置。配置见 `lua/plugins/aerial.lua`。
 
-------
-
-#### 推荐用 `universal-ctags`
-
-如果你希望用功能更强、更新更频繁的版本，可以选择 Universal Ctags：
-
-```bash
-sudo apt remove exuberant-ctags
-git clone https://github.com/universal-ctags/ctags.git
-cd ctags
-./autogen.sh
-./configure
-make
-sudo make install
-```
-
-之后再运行：
-
-```bash
-ctags --version
-```
-
-你应该会看到：
-
-```
-Universal Ctags ...
-```
+> 📌 **极简原则**：本配置刻意避免功能重复的插件。符号大纲统一用 aerial，跳转/移动统一用 easymotion，诊断列表用 trouble，各司其职、不堆叠。
 
 ### 大型代码库符号跳转（gtags / cscope）
 
@@ -255,13 +228,15 @@ require('mason').setup({
 })
 
 require('mason-lspconfig').setup({
-  -- clangd 的预编译二进制不支持 aarch64（树莓派），改用系统包 /usr/bin/clangd
+  -- clangd 不交给 mason：其预编译二进制不支持 aarch64（树莓派），改用系统 PATH 上的 clangd
   ensure_installed = { 'lua_ls', 'pylsp' },
   automatic_installation = false,
 })
 ```
 
-> 💡 我们想要用什么语言的 LSP 就在 `ensure_installed` 里面加上，完整的列表可以看 [server_configurations](https://github.com/neovim/nvim-lspconfig/blob/master/doc/server_configurations.md)。这里常用的就 `python`（pylsp）和配置 Nvim 用的 `lua_ls`；`clangd` 因为在 aarch64（树莓派）上没有预编译二进制，改用系统包管理器安装的 `/usr/bin/clangd`，直接走 PATH 而不经过 mason
+> 💡 我们想要用什么语言的 LSP 就在 `ensure_installed` 里面加上，完整的列表可以看 [server_configurations](https://github.com/neovim/nvim-lspconfig/blob/master/doc/server_configurations.md)。这里常用的就 `python`（pylsp）和配置 Nvim 用的 `lua_ls`；`clangd` 因为在 aarch64（树莓派）上没有预编译二进制，改用系统包管理器安装的 clangd，直接走 PATH 而不经过 mason
+
+> ⚙️ **clangd 二进制可移植探测**：`lua/plugins/lsp.lua` 不写死 clangd 路径/版本，而是在启动时探测 PATH 上**版本最高**的 `clangd-NN`（从 `clangd-30` 到 `clangd-15`），找不到带版本号的再回退到裸 `clangd`。同时探测其主版本号：只有 **clangd ≥ 15** 才追加 `--rename-file-limit` / `--background-index-priority` 这两个新参数（旧版本传入会以 exit 1 崩溃）。这样同一份配置在不同机器上都能自适应，探测不到 clangd 时会 `vim.notify` 提示而非报错。clangd 的安装见「7、编译器/构建工具集成」。
 
 **Neovim 0.11 原生 LSP 写法**：不再为每个 server 手写 `on_attach`，而是用 `vim.lsp.config` 声明配置、`vim.lsp.enable` 启用，再用一个 `LspAttach` autocmd 统一设置所有 buffer-local 快捷键
 
@@ -273,10 +248,11 @@ vim.lsp.config('*', { capabilities = capabilities })
 
 -- 各 server 声明
 vim.lsp.config('pylsp',  { cmd = { "pylsp" }, filetypes = { "python" }, ... })
-vim.lsp.config('clangd', { cmd = { "clangd", "--background-index", ... }, filetypes = { "c", "cpp", ... } })
+-- clangd_bin 为运行时探测到的二进制（clangd-NN 优先，回退裸 clangd）
+vim.lsp.config('clangd', { cmd = { clangd_bin, "--background-index", ... }, filetypes = { "c", "cpp", ... } })
 vim.lsp.config('lua_ls', { cmd = { "lua-language-server" }, settings = { Lua = { ... } } })
 
--- 一行启用，nvim 按 filetype 自动启动对应 server
+-- 一行启用，nvim 按 filetype 自动启动对应 server（clangd 仅在探测到二进制时才 enable）
 vim.lsp.enable({ 'pylsp', 'clangd', 'lua_ls' })
 
 -- 统一的 buffer-local 快捷键（gD/gd/K/gi/<space>rn/<space>ca/gr/<space>f 等）
@@ -311,6 +287,82 @@ Linux Kernel
 Run 'scripts/clang-tools/gen_compile_commands.py' after kernel compiling. This will generate compile_commands.json in the top directory.
 
 After that, editing c file in the kernel repo will make clangd start to act as a language server.
+
+# 7、编译器 / 构建工具集成
+
+语义系统离不开编译器与一套高效的工具链。下面记录主力机（aarch64 树莓派，Ubuntu 22.04 jammy）上的安装方式。所有工具都**独立于 Neovim**、不增加编辑器启动开销，符合「极简 + 唯快不破」的取向。
+
+> ⚠️ **apt 源说明（树莓派 / arm64 必读）**：本机默认 `/etc/apt/sources.list` 指向 `mirrors.aliyun.com/ubuntu`，但该路径**只有 amd64**，arm64 会返回 404。真正有效的 arm64 源是 `ports.ubuntu.com/ubuntu-ports`（保存在 `/etc/apt/sources.list-b`）。下面安装命令通过 `-o Dir::Etc::sourcelist=sources.list-b` 临时指定该有效源，并 `http_proxy= https_proxy=` 直连（避免代理把明文仓库请求劫持成 404）。
+
+## 7.1 clangd（语义系统核心）
+
+clangd 在 aarch64 上没有官方预编译二进制，且发行版自带的版本偏旧（jammy 仓库只有 clangd 14，缺少 `--rename-file-limit` / `--background-index-priority` 等新参数）。改从 **LLVM 官方 apt 源**安装最新版（当前 **clangd 22.1.8**）：
+
+```bash
+# 1) 添加 LLVM 官方源（脚本会写入 GPG key 和 apt 源条目）
+wget https://apt.llvm.org/llvm.sh        # 代理环境下 wget 比 curl 更稳
+sudo -E bash llvm.sh                      # 默认安装最新稳定版（当前 LLVM 22）
+
+# 2) 若 apt update 被其它坏源拖累失败，只刷新 LLVM 源后单独装：
+sudo apt-get update -o Dir::Etc::sourcelist=sources.list.d/archive_uri-https_apt_llvm_org_jammy_-jammy.list -o Dir::Etc::sourceparts=-
+sudo apt-get install -y clangd-22
+```
+
+装好后二进制是 `/usr/bin/clangd-22`。配置侧无需写死版本号 —— `lua/plugins/lsp.lua` 会自动探测（见上文 LSP 章节的「clangd 二进制可移植探测」）。
+
+> 💡 clangd 需要 `compile_commands.json` 才能正确跳转，生成方式见上一节「HOWTO Use Clangd」（普通工程用 `bear -- make`，内核用 `scripts/clang-tools/gen_compile_commands.py`）。
+
+## 7.2 ccache —— C/C++ 编译缓存
+
+树莓派上编译大型 C/C++ 工程（如内核）很慢，ccache 缓存编译结果，**重复编译可快数倍**：
+
+```bash
+sudo apt-get install -y ccache
+```
+
+启用方式：把 ccache 的编译器 shim 目录放到 PATH 最前，gcc/g++ 调用即自动走缓存。已加入 `~/.bashrc`：
+
+```bash
+# ccache: 把编译器 shim 目录放到 PATH 最前，gcc/g++ 自动走编译缓存
+export PATH="/usr/lib/ccache:$PATH"
+```
+
+验证缓存是否生效：`ccache -s` 查看 hit/miss 统计（第一次编译全 miss，第二次同样的编译应大量 hit）。
+
+## 7.3 mold —— 高速链接器
+
+mold 是替代 `ld` 的超快链接器，大型 C++/Rust 项目的链接阶段提速明显：
+
+```bash
+sudo apt-get install -y mold
+```
+
+为安全起见**不替换系统全局链接器**，按需使用：
+
+```bash
+mold -run make                       # C/C++：临时用 mold 链接
+mold -run cargo build                # Rust：临时用 mold 链接
+gcc ... -fuse-ld=mold                # 直接在编译命令里指定
+```
+
+Rust 持久化（写入 `~/.cargo/config.toml`）：
+
+```toml
+[target.aarch64-unknown-linux-gnu]
+rustflags = ["-C", "link-arg=-fuse-ld=mold"]
+```
+
+## 7.4 fd —— 更干净的文件查找
+
+telescope 的 `find_files` 优先用 fd（尊重 `.gitignore`、自动排除 `.git`，结果列表更干净）。Ubuntu/Debian 上包名是 `fd-find`，二进制叫 `fdfind`（与同名旧包冲突而改名）：
+
+```bash
+sudo apt-get install -y fd-find       # 二进制为 /usr/bin/fdfind
+```
+
+`lua/plugins/telescope.lua` 已做自适应：优先 `fd`（多数发行版）→ 其次 `fdfind`（Ubuntu/Debian）→ 都没有则回退 telescope 默认的 `find`，因此装不装都不影响可用性。
+
+> 📝 实测：树莓派这类慢 IO 设备上 fd **不一定比 find 快**（多线程开销可能盖过收益），用它主要是图「结果干净」；真正稳定的提速来自 ccache / mold / ripgrep。
 
 # CLAUDE
 
