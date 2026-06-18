@@ -37,8 +37,7 @@ UBUNTU_CODENAME=jammy
    cd neovim
    ```
 
-   - If you want the **stable release**, also run `git checkout stable`.OR`git checkout v0.11.5`目前使用的是V0.11.5
-
+   - If you want the **stable release**, also run `git checkout stable`.OR`git checkout NVIM v0.12.3`
 4. ```
    make CMAKE_BUILD_TYPE=RelWithDebInfo
    ```
@@ -64,29 +63,44 @@ UBUNTU_CODENAME=jammy
 
 `Nvim` 的配置目录在 `~/.config/nvim` 下。在 Linux/Mac 系统上，`Nvim` 会默认读取 `~/.config/nvim/init.lua` 文件，**理论上**来说可以将所有配置的东西都放在这个文件里面，但这样不是一个好的做法，因此我划分不同的文件和目录来分管不同的配置
 
-首先看下按照本篇教程配置 `Nvim` 之后，目录结构看起来会是怎么样⬇️
+首先看下当前配置的目录结构看起来会是怎么样⬇️
 
 ```
 .
-├── init.lua
-└── lua
-    ├── colorscheme.lua
-    ├── keymaps.lua
-    ├── lsp.lua
-    ├── options.lua
-    └── plugins.lua
+├── init.lua                # 入口：mapleader → lazy.nvim 引导 → require options/keymaps → lazy.setup("plugins")
+├── lua
+│   ├── options.lua         # vim 选项
+│   ├── keymaps.lua         # 全局按键映射（含 Copilot 等无独立插件 spec 的快捷键）
+│   └── plugins/            # 插件目录，lazy.nvim 通过 import 自动加载本目录下每个文件
+│       ├── colorscheme.lua # kanagawa 主题
+│       ├── lsp.lua         # mason + mason-lspconfig + nvim-lspconfig（Neovim 0.11 写法）
+│       ├── cmp.lua         # nvim-cmp + lspkind + LuaSnip + cmp-* 依赖
+│       ├── treesitter.lua  # nvim-treesitter + treesitter-textobjects
+│       ├── telescope.lua   # 模糊查找
+│       ├── nvim-tree.lua   # 文件树
+│       ├── aerial.lua      # 代码大纲
+│       ├── tagbar.lua      # 基于标签的标识符列表
+│       ├── gtags.lua       # cscope/gtags 符号跳转（cscope_maps.nvim）
+│       ├── trouble.lua     # 诊断/引用列表
+│       ├── bufferline.lua  # 顶部 buffer 标签栏
+│       ├── easymotion.lua  # 快速移动
+│       ├── highlighter.lua # vim-highlighter
+│       ├── markdown.lua    # vim-markdown + markdown-preview + rust.vim
+│       ├── claude.lua      # claudecode.nvim（AI 编程）
+│       └── misc.lua        # faster.nvim + fidget.nvim 等零/极简配置的小插件
+├── claude                  # Claude Code 相关配置（见下文 CLAUDE 章节）
+└── lazy-lock.json          # lazy.nvim 锁定的插件版本
 ```
 
 **解释如下**
 
--  `init.lua`为`Nvim`配置的 Entry point，我们主要用来导入其他 `*.lua` 文件
-  - `colorscheme.lua` 配置主题
-  - `keymaps.lua` 配置按键映射
-  - `lsp.lua` 配置 LSP
-  - `options.lua` 配置选项
-  - `plugins.lua` 配置插件
+-  `init.lua` 为 `Nvim` 配置的 Entry point。它负责设置 `mapleader`、引导（bootstrap）`lazy.nvim`、`require('options')` / `require('keymaps')`，最后用 `require("lazy").setup("plugins")` 一行加载整个 `lua/plugins/` 目录
+- `lua/options.lua` 配置选项，`lua/keymaps.lua` 配置全局按键映射
+- `lua/plugins/` 目录采用**「每个插件一个文件」**的约定：每个 `*.lua` 文件 `return` 一个（或一组相关的）插件 spec，配置代码内联到 spec 的 `config` / `opts` / `init` 字段，不再有独立的 `config/` 目录。`lazy.nvim` 会通过 `import` 自动扫描并加载本目录下的所有文件
 - `lua`目录。当我们在 Lua 里面调用`require`加载模块（文件）的时候，它会自动在`lua`文件夹里面进行搜索
   - *将路径分隔符从 `/` 替换为 `.`，然后去掉 `.lua` 后缀就得到了 `require` 的参数格式*
+
+> 📌 这是一次结构重构的结果。早先的配置把所有插件 spec 堆在单个 `lua/plugins.lua` 里，并用 `lua/config/*.lua` 存放每个插件的配置；现在统一改成 `lua/plugins/` 下「每插件一文件、配置内联」的组织方式，`colorscheme` 和 `lsp` 也都作为普通插件 spec 进入该目录、由 lazy 加载，不再在 `init.lua` 顶层 `require`。
 
 ### 选项配置
 
@@ -116,9 +130,13 @@ vim.keymap.set(<mode>, <key>, <action>, <opts>)
 - 支持定制 Lazy loading，比如基于 Event、Filetype 等
 - …
 
-新建 `~/.config/nvim/lua/plugins.lua` 文件并放入如下内容。下面的模板只完成了 `lazy.nvim` 自身的安装，**还没有指定其他第三方插件**
+`lazy.nvim` 自身的引导（bootstrap）逻辑直接放在 `init.lua` 顶部。下面的模板完成 `lazy.nvim` 的自动安装，并通过 `import` 加载 `lua/plugins/` 整个目录
 
 ```lua
+-- ~/.config/nvim/init.lua
+vim.g.mapleader = ' '   -- 必须在加载插件之前设置
+
+-- ============ lazy.nvim bootstrap ============
 local lazypath = vim.fn.stdpath("data") .. "/lazy/lazy.nvim"
 if not (vim.uv or vim.loop).fs_stat(lazypath) then
   vim.fn.system({
@@ -132,16 +150,27 @@ if not (vim.uv or vim.loop).fs_stat(lazypath) then
 end
 vim.opt.rtp:prepend(lazypath)
 
-require("lazy").setup({})
+-- ============ Core settings ============
+require("options")
+require("keymaps")
+
+-- ============ Plugins（自动 import lua/plugins/ 目录）============
+require("lazy").setup("plugins")
 ```
 
-在 `lazy.nvim` 指定第三方插件很简单，只需要在 `require("lazy").setup({ ... })` 的 `...` 里面声明插件
+关键在于最后一行 `require("lazy").setup("plugins")`：传入字符串 `"plugins"` 时，`lazy.nvim` 会 `import` 整个 `lua/plugins/` 目录，自动收集每个文件 `return` 的插件 spec。这样新增一个插件只需在 `lua/plugins/` 下新建一个 `.lua` 文件，无需改动 `init.lua`
 
-然后在 `init.lua` 文件里面再次加上一行导入这个文件
+每个插件文件形如：
 
 ```lua
-... -- 省略其他行
-require('plugins')
+-- lua/plugins/telescope.lua
+return {
+  'nvim-telescope/telescope.nvim',
+  dependencies = { 'nvim-lua/plenary.nvim', 'nvim-treesitter/nvim-treesitter' },
+  config = function()
+    require('telescope').setup({ --[[ 配置内联在此 ]] })
+  end,
+}
 ```
 
 ## 代码分析
@@ -184,77 +213,85 @@ ctags --version
 Universal Ctags ...
 ```
 
+### 大型代码库符号跳转（gtags / cscope）
+
+对于内核、大型 C/C++ 工程，仅靠 LSP 索引可能力不从心。这里用 GNU GLOBAL（gtags）建立全局索引，并通过 [cscope_maps.nvim](https://github.com/dhananjaylatkar/cscope_maps.nvim) 的 cscope 接口做符号跳转，跳转结果走 telescope 展示。配置在 `lua/plugins/gtags.lua`
+
+前置依赖与建索引：
+
+```bash
+sudo apt install global            # 提供 gtags / global / gtags-cscope
+
+# 在工程根目录建索引（建好后会生成 GTAGS / GRTAGS / GPATH 三个文件）
+gtags                              # 普通工程
+make gtags                         # Linux 内核源码（自带 target）
+```
+
+> 💡 这里**刻意不用** `vim-gutentags` 自动维护索引：它的 cscope_maps 桥接会把 db 路径劫持到 `~/.cache/gutentags` 下，对超大代码库（如内核）容易建索引失败而导致查询永远为空。改为手动在源码树里建 `GTAGS`，索引改动后按 `<leader>gb` 手动重建。
+
 ### 自动补全插件
 
-**Warning**
+自动补全采用 [nvim-cmp](https://github.com/hrsh7th/nvim-cmp)，配置内联在 `lua/plugins/cmp.lua`，组合了以下几个组件：
 
-[blink.cmp](https://github.com/saghen/blink.cmp) 还在 beta 版本，这意味着变动会比较大，而且可能会遇到不少 Bug。但我目前日常使用下来没有问题 :)
+- `hrsh7th/nvim-cmp` —— 补全引擎本体
+- `L3MON4D3/LuaSnip` —— 代码片段（snippet）引擎
+- `onsails/lspkind.nvim` —— VSCode 风格的补全图标
+- 补全来源：`cmp-nvim-lsp`（LSP）、`cmp-buffer`（当前缓冲区）、`cmp-path`（路径）、`cmp-cmdline`（命令行）
 
-​	之前本文的自动补全插件采用的是 [nvim-cmp](https://github.com/hrsh7th/nvim-cmp)，但配置上较为繁琐。现在有了 [blink.cmp](https://github.com/saghen/blink.cmp) 插件，*配置会比较简单而且自动补全特别快*
-
-在 `plugins.lua`里新增这个插件并做好配置
-
-关注其中的 `opts` 配置选项即可，关键的几个*解释如下*
-
-Key用于配置按键映射，格式也很好理解
-
-- `preset = "enter"` 表示用 `回车键` 确定当前选中的补全项
-- `select_prev, select_next` 用于在各个候选项中进行选择，我这里配置了 2 套按键，支持用⬆️/⬇️，或者用 Tab/Shift-Tab 进行补全项的选择
-- `scroll_documentation_up, scroll_documentation_down` 用于滚动 API 的文档，我配置的是 `Ctrl-b, Ctrl-f`
-
-- `trigger = { show_on_trigger_character = true }` - 输入字符之后就会展示所有可用补全项
-- `documentation = { auto_show = true }` - 自动显示当前被选中补全项的文档
+补全所需的 capabilities 在 `lua/plugins/lsp.lua` 里通过 `cmp_nvim_lsp.default_capabilities()` 设置（见上文 LSP 章节），两者协同工作
 
 > 🎙️ 到这为止，重新启动 `Nvim` 后，等待插件安装完成后应该就能够用初步的自动补全功能了～
 
 ### LSP 配置
 
-​	要把 `Nvim` 变成 IDE 就势必要借助于 LSP[3](https://martinlwx.github.io/zh-cn/config-neovim-from-scratch/#fn:3)，自己安装和配置 LSP 是比较繁琐的。不同的 LSP 安装方法不同，也不方便后续管理。[mason.nvim](https://github.com/williamboman/mason.nvim) 和配套的 [mason-lspconfig.nvim](https://github.com/williamboman/mason-lspconfig.nvim) 这两个插件很好解决了这个问题 
+​	要把 `Nvim` 变成 IDE 就势必要借助于 LSP[3](https://martinlwx.github.io/zh-cn/config-neovim-from-scratch/#fn:3)，自己安装和配置 LSP 是比较繁琐的。不同的 LSP 安装方法不同，也不方便后续管理。[mason.nvim](https://github.com/williamboman/mason.nvim) 和配套的 [mason-lspconfig.nvim](https://github.com/williamboman/mason-lspconfig.nvim) 这两个插件很好解决了这个问题。LSP 的全部声明与配置都内联在 `lua/plugins/lsp.lua` 这一个文件里
 
-首先修改 `plugins.lua` 文件，增加对应的插件
+整个 spec 包含 `mason.nvim`、`mason-lspconfig.nvim`、`nvim-lspconfig`（以及给 capabilities 用的 `cmp-nvim-lsp`），在 `config` 函数里完成全部设置：
 
-```
-... -- 省略其他行
-require("lazy").setup({
-	-- LSP manager
-	"williamboman/mason.nvim",
-	"williamboman/mason-lspconfig.nvim",
-	"neovim/nvim-lspconfig",
-    ... -- 省略其他行
-})
-```
-
-新建一个 `~/.config/nvim/lua/lsp.lua` 文件并编辑，首先配置 `mason` 和 `mason-lspconfig`
-
-```
+```lua
+-- lua/plugins/lsp.lua（节选）
 require('mason').setup({
-    ui = {
-        icons = {
-            package_installed = "✓",
-            package_pending = "➜",
-            package_uninstalled = "✗"
-        }
-    }
+  ui = { icons = { package_installed = "✓", package_pending = "➜", package_uninstalled = "✗" } },
 })
 
 require('mason-lspconfig').setup({
-    -- A list of servers to automatically install if they're not already installed
-    ensure_installed = { 'pylsp', 'lua_ls', 'rust_analyzer' },
+  -- clangd 的预编译二进制不支持 aarch64（树莓派），改用系统包 /usr/bin/clangd
+  ensure_installed = { 'lua_ls', 'pylsp' },
+  automatic_installation = false,
 })
 ```
 
-> 💡 我们想要用什么语言的 LSP 就在 `ensure_installed` 里面加上，完整的列表可以看 [server_configurations](https://github.com/neovim/nvim-lspconfig/blob/master/doc/server_configurations.md)。我个人常用的就 `python/rust` 这两个编程语言，而因为我们都用 Lua 语言来配置 `Nvim`，所以也加上了 `lua_ls`
+> 💡 我们想要用什么语言的 LSP 就在 `ensure_installed` 里面加上，完整的列表可以看 [server_configurations](https://github.com/neovim/nvim-lspconfig/blob/master/doc/server_configurations.md)。这里常用的就 `python`（pylsp）和配置 Nvim 用的 `lua_ls`；`clangd` 因为在 aarch64（树莓派）上没有预编译二进制，改用系统包管理器安装的 `/usr/bin/clangd`，直接走 PATH 而不经过 mason
 
-配置好 `mason-lspconfig` 之后，接下来就可以配置 `nvim-lspconfig` 了。因为配置的代码比较长，下面只展示了 `pylsp` 的配置，其他语言的配置大同小异。如果有疑惑，可以查看该文件的[最新版本](https://github.com/MartinLwx/dotfiles/blob/main/nvim/lua/lsp.lua)
+**Neovim 0.11 原生 LSP 写法**：不再为每个 server 手写 `on_attach`，而是用 `vim.lsp.config` 声明配置、`vim.lsp.enable` 启用，再用一个 `LspAttach` autocmd 统一设置所有 buffer-local 快捷键
 
-> 💡 每个 LSP 都存在自己可以配置的选项，你可以自己去对应 LSP 的 GitHub 仓库查阅更多信息。如果要用默认配置的话，基本上每一个新的语言都只需要设置 `on_attach = on_attach`
+```lua
+-- 全局 capabilities（来自 cmp-nvim-lsp），只设一次
+local capabilities = require("cmp_nvim_lsp").default_capabilities()
+capabilities.offsetEncoding = { "utf-16" }
+vim.lsp.config('*', { capabilities = capabilities })
 
-编辑 `~/.config/nvim/lua/lsp.lua` 文件新增如下内容上面的按键绑定的意思是很直观的，这里就不多解释啦最后在 `init.lua` 文件里面加上
+-- 各 server 声明
+vim.lsp.config('pylsp',  { cmd = { "pylsp" }, filetypes = { "python" }, ... })
+vim.lsp.config('clangd', { cmd = { "clangd", "--background-index", ... }, filetypes = { "c", "cpp", ... } })
+vim.lsp.config('lua_ls', { cmd = { "lua-language-server" }, settings = { Lua = { ... } } })
 
+-- 一行启用，nvim 按 filetype 自动启动对应 server
+vim.lsp.enable({ 'pylsp', 'clangd', 'lua_ls' })
+
+-- 统一的 buffer-local 快捷键（gD/gd/K/gi/<space>rn/<space>ca/gr/<space>f 等）
+vim.api.nvim_create_autocmd('LspAttach', {
+  group = vim.api.nvim_create_augroup('UserLspConfig', {}),
+  callback = function(ev)
+    local bufopts = { noremap = true, silent = true, buffer = ev.buf }
+    vim.keymap.set('n', 'gd', vim.lsp.buf.definition, bufopts)
+    vim.keymap.set('n', 'K',  vim.lsp.buf.hover, bufopts)
+    -- ... 其余快捷键同理
+  end,
+})
 ```
-... -- 省略其他行
-require('lsp')
-```
+
+> 💡 因为这是一个普通的插件 spec，放在 `lua/plugins/lsp.lua` 后由 lazy.nvim 自动加载，**不需要**再在 `init.lua` 里手动 `require('lsp')`
 
 ​	重启 `Nvim` 之后，你应该可以在下面的状态栏看到 `Mason` 正在下载并安装前面我们指定的 LSP（**注意此时不能关闭 `Nvim`**），可以输入 `:Mason` 查看安装进度。在你等待安装的过程中，可以输入 `g?` 查看更多帮助信息了解如何使用 `mason` 插件
 
@@ -276,7 +313,13 @@ Run 'scripts/clang-tools/gen_compile_commands.py' after kernel compiling. This w
 After that, editing c file in the kernel repo will make clangd start to act as a language server.
 
 # CLAUDE
-将claude文件下的配置文件放入~/.claude目录下
+
+将 `claude/` 目录下的配置文件放入 `~/.claude/` 目录下。其中包含：
+
+- `settings.json` —— Claude Code 设置
+- `statusline-command.sh` —— 自定义状态栏脚本，显示模型、reasoning effort、上下文窗口占用进度条与 token 使用量，以及 5 小时速率限制用量
+
+编辑器内的 Claude Code 集成由 [claudecode.nvim](https://github.com/coder/claudecode.nvim) 提供（配置见 `lua/plugins/claude.lua`）。
 
 # [REF]
 
