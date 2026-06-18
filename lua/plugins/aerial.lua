@@ -32,12 +32,12 @@ require("aerial").setup({
 	  -- options will open the window in the other direction *if* there is a
 	  -- different buffer in the way of the preferred direction
 	  -- Enum: prefer_right, prefer_left, right, left, float
-	  default_direction = "prefer_left",
+	  default_direction = "left",
 	
 	  -- Determines where the aerial window will be opened
 	  --   edge   - open aerial at the far right/left of the editor
 	  --   window - open aerial to the right/left of the current window
-	  placement = "window",
+	  placement = "edge",
 	
 	  -- When the symbols change, resize the aerial window (within min/max constraints) to fit
 	  resize_to_content = true,
@@ -111,34 +111,32 @@ require("aerial").setup({
 	-- This can be a filetype map (see :help aerial-filetype-map)
 	-- To see all available values, see :help SymbolKind
 	filter_kind = {
-		filter_kind = {
-		  c = {
-		    "Struct",     -- 结构体
-		    "Function",   -- 函数
-		    "Macro",      -- 宏定义
-		    "Enum",       -- 枚举
-		    "Union",      -- 联合体
-		    "Variable",   -- 变量
-		    "Constant",   -- 常量
-		    "Field",      -- 结构体字段
-		  },
-		  cpp = {
-		    "Class",       -- 类
-		    "Struct",      -- 结构体
-		    "Function",    -- 函数
-		    "Method",      -- 方法
-		    "Constructor", -- 构造函数
-		    "Enum",        -- 枚举
-		    "Macro",       -- 宏定义
-		    "Namespace",   -- 命名空间
-		    "Variable",    -- 变量
-		    "Field",       -- 字段
-		    "Constant",    -- 常量
-		    "Union",       -- 联合体
-		    "Module",      -- 模块
-		  },
-		  _ = false, -- 其他语言默认显示全部符号
-		}
+		c = {
+		  "Struct",     -- 结构体
+		  "Function",   -- 函数
+		  "Macro",      -- 宏定义
+		  "Enum",       -- 枚举
+		  "Union",      -- 联合体
+		  "Variable",   -- 变量
+		  "Constant",   -- 常量
+		  "Field",      -- 结构体字段
+		},
+		cpp = {
+		  "Class",       -- 类
+		  "Struct",      -- 结构体
+		  "Function",    -- 函数
+		  "Method",      -- 方法
+		  "Constructor", -- 构造函数
+		  "Enum",        -- 枚举
+		  "Macro",       -- 宏定义
+		  "Namespace",   -- 命名空间
+		  "Variable",    -- 变量
+		  "Field",       -- 字段
+		  "Constant",    -- 常量
+		  "Union",       -- 联合体
+		  "Module",      -- 模块
+		},
+		_ = false, -- 其他语言默认显示全部符号
 	},
 	
 	-- Determines line highlighting mode when multiple splits are visible.
@@ -390,8 +388,10 @@ require("aerial").setup({
 -- 加载 aerial 的 telescope 扩展
 require("telescope").load_extension("aerial")
 
--- 切换符号大纲侧边栏（沿用原 tagbar 的 <leader>ilt 绑定）
-vim.keymap.set("n", "<leader>ilt", "<cmd>AerialToggle!<CR>", { desc = "Toggle Aerial Outline" })
+-- 切换 aerial 大纲（treesitter/LSP 后端）。
+-- 注意：<leader>ilt 留给 tagbar（ctags 后端，对内核 struct/宏/enum 更全），
+-- aerial 用 <leader>ila 以免键位冲突。
+vim.keymap.set("n", "<leader>ila", "<cmd>AerialToggle!<CR>", { desc = "Toggle Aerial Outline" })
 
 -- 用 telescope 显示 outline（来自 aerial）
 --vim.keymap.set("n", "<leader>lt", function()
