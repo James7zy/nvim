@@ -10,7 +10,18 @@ return {
       return
     end
 
-    vim.keymap.set("n", "<leader>ff", builtin.find_files, {})
+    -- find_files 默认探测命令名 "fd"，但 Ubuntu/Debian 把 fd 装成 "fdfind"
+    -- （与同名旧包冲突）。这里自适应：优先 fd（多数发行版），其次 fdfind
+    -- （Ubuntu/Debian），都没有则不指定、让 telescope 回退到 find。
+    local fd_bin = vim.fn.executable("fd") == 1 and "fd"
+      or (vim.fn.executable("fdfind") == 1 and "fdfind" or nil)
+    local find_files_opts = fd_bin
+      and { find_command = { fd_bin, "--type", "f", "--hidden", "--exclude", ".git" } }
+      or {}
+
+    vim.keymap.set("n", "<leader>ff", function()
+      builtin.find_files(find_files_opts)
+    end, {})
     vim.keymap.set("n", "<leader>ft", builtin.git_files, {})
     vim.keymap.set("n", "<leader>fb", builtin.buffers, {})
     vim.keymap.set("n", "<leader>fg", builtin.live_grep, {}) -- NOTE: requires ripgrep
