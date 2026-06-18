@@ -9,11 +9,9 @@ return {
     vim.api.nvim_set_keymap('n', '<Leader>ss', '<Plug>(easymotion-overwin-f2)', { noremap = true, silent = true })
 
     -- 跳转到行
-    vim.api.nvim_set_keymap('n', '<Leader>L', '<Plug>(easymotion-bd-jk)', { noremap = true, silent = true })
     vim.api.nvim_set_keymap('n', '<Leader>L', '<Plug>(easymotion-overwin-line)', { noremap = true, silent = true })
 
     -- 跳转到单词
-    vim.api.nvim_set_keymap('n', '<Leader>w', '<Plug>(easymotion-bd-w)', { noremap = true, silent = true })
     vim.api.nvim_set_keymap('n', '<Leader>w', '<Plug>(easymotion-overwin-w)', { noremap = true, silent = true })
   end,
 }
