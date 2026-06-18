@@ -22,8 +22,8 @@ return {
       })
 
       require('mason-lspconfig').setup({
-        -- clangd 的预编译二进制不支持 aarch64（树莓派），改用系统包管理器安装的
-        -- /usr/bin/clangd（apt install clangd），下面 vim.lsp.config 直接走 PATH。
+        -- clangd 不交给 mason 管理：其预编译二进制不支持 aarch64（树莓派），
+        -- 改用系统 PATH 上的 clangd（见下方 resolve_clangd 自动探测）。
         ensure_installed = { 'lua_ls', 'pylsp' },
         automatic_installation = false,
       })
@@ -75,9 +75,35 @@ return {
         settings = {},
       })
 
-      vim.lsp.config('clangd', {
-        cmd = {
-          "clangd",
+      -- ============ clangd 二进制探测（可移植）============
+      -- 不写死版本号：优先选 PATH 上版本最高的 clangd（clangd-22 > clangd-18 >
+      -- … > clangd），找不到带版本后缀的就回退到裸 clangd。这样同一份配置在
+      -- 不同机器（树莓派 / 其他发行版 / 自带较老 clangd）上都能自适应。
+      local function resolve_clangd()
+        local candidates = { "clangd" }
+        -- 探测 clangd-NN（NN 从高到低），命中即用。
+        for ver = 30, 15, -1 do
+          table.insert(candidates, 1, "clangd-" .. ver)
+        end
+        for _, bin in ipairs(candidates) do
+          if vim.fn.executable(bin) == 1 then
+            return bin
+          end
+        end
+        return nil
+      end
+
+      -- 探测 clangd 主版本号，用于决定是否启用版本相关参数。
+      local function clangd_major(bin)
+        local out = vim.fn.system({ bin, "--version" })
+        local major = out:match("clangd version (%d+)")
+        return tonumber(major)
+      end
+
+      local clangd_bin = resolve_clangd()
+      if clangd_bin then
+        local clangd_cmd = {
+          clangd_bin,
           "--background-index",
           "--clang-tidy",
           "--header-insertion=never",
@@ -85,12 +111,22 @@ return {
           "--enable-config",
           "--completion-style=detailed",
           "--function-arg-placeholders",
-          "--rename-file-limit=0",
-          "--background-index-priority=normal",
-        },
-        filetypes = { "c", "cpp", "objc", "objcpp" },
-        root_markers = { '.git' },
-      })
+        }
+        -- 这两个参数在 clangd 15+ 才支持，旧版本传入会导致进程以 exit 1 退出。
+        local major = clangd_major(clangd_bin)
+        if major and major >= 15 then
+          table.insert(clangd_cmd, "--rename-file-limit=0")
+          table.insert(clangd_cmd, "--background-index-priority=normal")
+        end
+
+        vim.lsp.config('clangd', {
+          cmd = clangd_cmd,
+          filetypes = { "c", "cpp", "objc", "objcpp" },
+          root_markers = { '.git' },
+        })
+      else
+        vim.notify("clangd 未安装，C/C++ LSP 未启用", vim.log.levels.WARN)
+      end
 
       vim.lsp.config('lua_ls', {
         cmd = { "lua-language-server" },
@@ -106,7 +142,11 @@ return {
         },
       })
 
-      vim.lsp.enable({ 'pylsp', 'clangd', 'lua_ls' })
+      local servers = { 'pylsp', 'lua_ls' }
+      if clangd_bin then
+        table.insert(servers, 'clangd')
+      end
+      vim.lsp.enable(servers)
     end,
   },
 }
