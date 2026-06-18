@@ -22,22 +22,24 @@ return {
       })
 
       require('mason-lspconfig').setup({
+        -- clangd 的预编译二进制不支持 aarch64（树莓派），改用系统包管理器安装的
+        -- /usr/bin/clangd（apt install clangd），下面 vim.lsp.config 直接走 PATH。
         ensure_installed = { 'lua_ls', 'pylsp' },
-        automatic_installation = true,
+        automatic_installation = false,
       })
 
       -- ============ Diagnostics global keymaps ============
       local opts = { noremap = true, silent = true }
       vim.keymap.set('n', '<space>e', vim.diagnostic.open_float, opts)
-      vim.keymap.set('n', '[d', vim.diagnostic.goto_prev, opts)
-      vim.keymap.set('n', ']d', vim.diagnostic.goto_next, opts)
+      vim.keymap.set('n', '[d', function() vim.diagnostic.jump({ count = -1, float = true }) end, opts)
+      vim.keymap.set('n', ']d', function() vim.diagnostic.jump({ count = 1, float = true }) end, opts)
       vim.keymap.set('n', '<space>q', vim.diagnostic.setloclist, opts)
 
       -- ============ Shared on-attach via LspAttach ============
       vim.api.nvim_create_autocmd('LspAttach', {
         group = vim.api.nvim_create_augroup('UserLspConfig', {}),
         callback = function(ev)
-          vim.api.nvim_buf_set_option(ev.buf, 'omnifunc', 'v:lua.vim.lsp.omnifunc')
+          vim.bo[ev.buf].omnifunc = 'v:lua.vim.lsp.omnifunc'
 
           local bufopts = { noremap = true, silent = true, buffer = ev.buf }
           vim.keymap.set('n', 'gD', vim.lsp.buf.declaration, bufopts)
@@ -75,7 +77,7 @@ return {
 
       vim.lsp.config('clangd', {
         cmd = {
-          "/usr/bin/clangd",
+          "clangd",
           "--background-index",
           "--clang-tidy",
           "--header-insertion=never",
