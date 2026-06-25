@@ -48,7 +48,7 @@ return {
       -- Useful when you work in remote Vim and preview on local browser.
       -- For more details see: https://github.com/iamcco/markdown-preview.nvim/pull/9
       -- default empty
-      vim.g.mkdp_open_ip = "192.168.112.178"
+      vim.g.mkdp_open_ip = "0.0.0.0"
 
       -- specify browser to open preview page
       -- for path with space
