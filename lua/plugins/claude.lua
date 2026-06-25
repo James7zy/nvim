@@ -48,9 +48,9 @@ return {
 
     -- Diff Integration
     diff_opts = {
-      layout = "vertical", -- "vertical" or "horizontal"
+      layout = "horizontal", -- "vertical" or "horizontal"
       open_in_new_tab = false,
-      keep_terminal_focus = false, -- If true, moves focus back to terminal after diff opens
+      keep_terminal_focus = true, -- Keep focus in the Claude terminal when a diff opens (less intrusive)
       hide_terminal_in_new_tab = false,
       auto_resize_terminal = true, -- Let the plugin manage the terminal width across the diff lifecycle
       -- on_new_file_reject = "keep_empty", -- "keep_empty" or "close_window"
