@@ -32,12 +32,12 @@ return {
           prompt_position = "bottom", -- 输入框放窗口下方，结果列表在其上方
         },
 
-        -- <C-y>：在搜索窗内随时开/关预览（grep 类默认隐藏预览以省渲染，
-        -- 需要看上下文时按它调出来）。选 <C-y> 是因为 telescope 默认未占用它，
-        -- 而 <C-p> 默认是“上移选择”，会冲突。insert/normal 两种模式都绑。
+        -- <C-o>：在搜索窗内随时开/关预览（grep 类默认隐藏预览以省渲染，
+        -- 需要看上下文时按它调出来）。与 fzf-lua 的切预览键保持一致（o=open）。
+        -- insert/normal 两种模式都绑。
         mappings = {
-          i = { ["<C-y>"] = actions_layout.toggle_preview },
-          n = { ["<C-y>"] = actions_layout.toggle_preview },
+          i = { ["<C-o>"] = actions_layout.toggle_preview },
+          n = { ["<C-o>"] = actions_layout.toggle_preview },
         },
 
         -- 默认忽略构建产物 / 二进制 / 巨大目录（内核类仓库尤其重要）
@@ -64,7 +64,7 @@ return {
     -- （见 lua/plugins/fzf-lua.lua）——fzf-lua 把搜索/排序外包给独立 fzf 进程，
     -- 在树莓派这类弱主机上更轻快。telescope 本体在此保留，因为 gtags 跳转
     -- （cscope_maps，gtags.lua）和 aerial 大纲（aerial.lua）仍以它作为 picker。
-    -- 上面的 setup（disable_devicons / <C-y> 切预览 / file_ignore_patterns）
+    -- 上面的 setup（disable_devicons / <C-o> 切预览 / file_ignore_patterns）
     -- 对这些保留的 telescope 入口依然生效。
     --
     -- ↓↓↓ 原 telescope 版的 <leader>f* 键位，暂时注释保留。若想从 fzf-lua 切回
@@ -79,7 +79,7 @@ return {
     --   and { find_command = { fd_bin, "--type", "f", "--hidden", "--exclude", ".git" } }
     --   or {}
     --
-    -- -- 公共减负选项：预览默认隐藏，<C-y> 可在窗内切换（见上方 setup 的 mappings）。
+    -- -- 公共减负选项：预览默认隐藏，<C-o> 可在窗内切换（见上方 setup 的 mappings）。
     -- local no_preview = { previewer = false }
     --
     -- vim.keymap.set("n", "<leader>ff", function()
