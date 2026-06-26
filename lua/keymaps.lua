@@ -23,8 +23,11 @@ vim.keymap.set("n", "<C-l>", "<C-w>l", opts)
 -- embedded Claude terminal). Without these, <C-w>h is sent to the terminal
 -- program instead of being handled by Neovim.
 vim.keymap.set("t", "<C-h>", [[<C-\><C-n><C-w>h]], opts)
-vim.keymap.set("t", "<C-j>", [[<C-\><C-n><C-w>j]], opts)
-vim.keymap.set("t", "<C-k>", [[<C-\><C-n><C-w>k]], opts)
+-- <C-j>/<C-k> 在 terminal 模式不再抢占：让出给 fzf-lua（终端 buffer）的列表
+-- 上下导航 Ctrl+j/k。终端里改用 <C-h>/<C-l> 横向跳窗口；普通窗口的 <C-j>/<C-k>
+-- 跳窗口（上面 normal 模式那套）不受影响。
+-- vim.keymap.set("t", "<C-j>", [[<C-\><C-n><C-w>j]], opts)
+-- vim.keymap.set("t", "<C-k>", [[<C-\><C-n><C-w>k]], opts)
 vim.keymap.set("t", "<C-l>", [[<C-\><C-n><C-w>l]], opts)
 -- <Esc> to leave terminal mode back to Normal mode
 vim.keymap.set("t", "<C-\\><C-n>", [[<C-\><C-n>]], opts)

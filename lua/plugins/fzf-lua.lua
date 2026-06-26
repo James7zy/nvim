@@ -21,13 +21,26 @@ return {
       winopts = {
         height = 0.85,
         width = 0.90,
-        -- 默认隐藏预览，保持轻快；需要时在窗内按 <C-y> 切换（见下方 keymap）
-        preview = { hidden = "hidden" },
+        -- 默认隐藏预览，保持轻快；需要时在窗内按 Ctrl+y 切换（见下方 keymap）。
+        -- hidden 是 boolean（见 win.lua 文档），用 true 而非字符串 "hidden"。
+        preview = { hidden = true },
       },
+      -- 其余键位用 fzf-lua 默认（Ctrl+j/k 上下、Tab 多选、方向键移动等）；
+      -- 只重绑切预览键：默认是 F4，但 F4 常被操作系统/终端截获按不出来，
+      -- 改用不会被截获、单手好按的 Ctrl+y。
+      --
+      -- 关键：fzf-lua 用的是 builtin previewer（neovim 浮窗渲染预览），它的
+      -- toggle-preview 动作注册在 keymap.builtin（neovim 层），而不是 keymap.fzf
+      -- （fzf 二进制层）。之前误放到 keymap.fzf 所以按了没反应。键名也要用 nvim
+      -- 的 <C-y> termcode 格式，而非 fzf 的 "ctrl-y"。
       keymap = {
-        fzf = {
-          -- 在 fzf 窗口内按 ctrl-y 切换预览显示/隐藏，对标 telescope 的 <C-y>
-          ["ctrl-y"] = "toggle-preview",
+        builtin = {
+          ["<C-y>"] = "toggle-preview",
+          -- 预览内容半页滚动（对标 vim 的 Ctrl+d/u）。默认预览翻页是 Shift+↓/↑，
+          -- 这里补上更顺手的 Ctrl+d/u。注意必须用 builtin 表里的 preview-*
+          -- 动作名（预览是 neovim builtin previewer 渲染的）。
+          ["<C-d>"] = "preview-half-page-down",
+          ["<C-u>"] = "preview-half-page-up",
         },
       },
       grep = {
