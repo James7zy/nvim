@@ -25,8 +25,9 @@ return {
         -- hidden 是 boolean（见 win.lua 文档），用 true 而非字符串 "hidden"。
         preview = { hidden = true },
       },
-      -- 其余键位用 fzf-lua 默认（Ctrl+j/k 上下、Tab 多选、方向键移动等）；
-      -- 只重绑切预览键：默认是 F4，但 F4 常被操作系统/终端截获按不出来，
+      -- Tab 默认是 toggle+down：会标记当前项，Enter 优先打开被标记的第一项。
+      -- 这里改成纯上下移动，避免 Tab 选中后 Enter 仍打开第一项。
+      -- 其余键位用 fzf-lua 默认；只重绑切预览键：默认是 F4，但 F4 常被操作系统/终端截获按不出来，
       -- 改用不会被截获、语义直观（o=open/overview）的 Ctrl+o。
       --
       -- 关键：fzf-lua 用的是 builtin previewer（neovim 浮窗渲染预览），它的
@@ -40,6 +41,10 @@ return {
           -- 动作名（预览是 neovim builtin previewer 渲染的）。
           ["<C-d>"] = "preview-half-page-down",
           ["<C-u>"] = "preview-half-page-up",
+        },
+        fzf = {
+          ["tab"] = "down",
+          ["shift-tab"] = "up",
         },
       },
       grep = {
