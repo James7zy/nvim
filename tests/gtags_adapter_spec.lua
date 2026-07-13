@@ -240,9 +240,18 @@ end
 
 local query_items = {}
 local last_query
+local query_calls = 0
+local query_shell_error = 0
+
+local function set_shell_error(code)
+  vim.fn.system({ "/bin/sh", "-c", "exit " .. tostring(code) })
+end
+
 vim.api.nvim_create_user_command("GscopeFind", function(opts)
+  query_calls = query_calls + 1
   last_query = { args = opts.fargs, bang = opts.bang }
   vim.fn.setqflist({}, "r", { title = "test GscopeFind", items = query_items })
+  set_shell_error(query_shell_error)
 end, { nargs = "+", bang = true })
 
 local fzf_calls = 0
@@ -252,6 +261,14 @@ package.loaded["fzf-lua"] = {
     eq(true, opts.valid_only)
   end,
 }
+
+local function with_fzf_stub(stub, fn)
+  local original = package.loaded["fzf-lua"]
+  package.loaded["fzf-lua"] = stub
+  local ok, err = xpcall(fn, debug.traceback)
+  package.loaded["fzf-lua"] = original
+  if not ok then error(err) end
+end
 
 local function manual_query_fixture(name)
   local root = temp_root .. "/query-" .. name
@@ -330,6 +347,111 @@ test("surfaces a line-zero database error instead of opening fzf", function()
   eq(false, adapter.find("g"))
   eq(before_fzf, fzf_calls)
   assert(notifications[#notifications].message:find("GTAGS corrupted", 1, true))
+end)
+
+test("reports a nonzero query exit status as a backend failure", function()
+  local root = manual_query_fixture("backend-failure")
+  query_items = { { text = '[cscope g: definition of "query_symbol"]' } }
+  local before_calls = query_calls
+  local ok, err = xpcall(function()
+    query_shell_error = 7
+    eq(false, adapter.find("g"))
+    eq(before_calls + 1, query_calls)
+    local notification = notifications[#notifications]
+    eq(vim.log.levels.ERROR, notification.level)
+    assert(notification.message:find("查询失败", 1, true))
+    assert(notification.message:find("7", 1, true))
+    assert(notification.message:find(root .. "/GTAGS", 1, true))
+    eq(nil, notification.message:find("未找到", 1, true))
+  end, debug.traceback)
+  query_shell_error = 0
+  set_shell_error(0)
+  if not ok then error(err) end
+end)
+
+test("rejects invalid query kinds without invoking GscopeFind", function()
+  manual_query_fixture("invalid-kind")
+  query_items = { { text = '[cscope x: invalid "query_symbol"]' } }
+  local before_calls = query_calls
+  local before_notifications = #notifications
+
+  eq(false, adapter.find(nil))
+  eq(false, adapter.find("x"))
+  eq(before_calls, query_calls)
+  eq(before_notifications + 2, #notifications)
+  for index = before_notifications + 1, #notifications do
+    eq(vim.log.levels.ERROR, notifications[index].level)
+    assert(notifications[index].message:find("查询类型", 1, true))
+  end
+end)
+
+test("reports fzf-lua without quickfix as unavailable", function()
+  local root = manual_query_fixture("fzf-missing-quickfix")
+  local first = root .. "/first.c"
+  local second = root .. "/second.c"
+  write(first, { "int query_symbol;" })
+  write(second, { "int query_symbol;" })
+  query_items = {
+    { text = '[cscope s: symbol "query_symbol"]' },
+    { filename = first, lnum = 1, col = 1, text = "first" },
+    { filename = second, lnum = 1, col = 1, text = "second" },
+  }
+
+  with_fzf_stub({}, function()
+    local call_ok, result = pcall(adapter.find, "s")
+    eq(true, call_ok)
+    eq(false, result)
+    local notification = notifications[#notifications]
+    eq(vim.log.levels.ERROR, notification.level)
+    assert(notification.message:find("fzf-lua", 1, true))
+  end)
+end)
+
+test("reports a synchronous fzf-lua quickfix failure", function()
+  local root = manual_query_fixture("fzf-throws")
+  local first = root .. "/first.c"
+  local second = root .. "/second.c"
+  write(first, { "int query_symbol;" })
+  write(second, { "int query_symbol;" })
+  query_items = {
+    { text = '[cscope s: symbol "query_symbol"]' },
+    { filename = first, lnum = 1, col = 1, text = "first" },
+    { filename = second, lnum = 1, col = 1, text = "second" },
+  }
+
+  with_fzf_stub({
+    quickfix = function()
+      error("test fzf failure")
+    end,
+  }, function()
+    local call_ok, result = pcall(adapter.find, "s")
+    eq(true, call_ok)
+    eq(false, result)
+    local notification = notifications[#notifications]
+    eq(vim.log.levels.ERROR, notification.level)
+    assert(notification.message:find("fzf-lua", 1, true))
+  end)
+end)
+
+test("preserves a manual query lock across adapter reloads", function()
+  local root = manual_query_fixture("manual-reload-lock")
+  query_items = { { text = '[cscope g: definition of "query_symbol"]' } }
+  local shared_state = _G.NvimGutentagsHybridState
+  shared_state.manual_updates = shared_state.manual_updates or {}
+  local before_calls = query_calls
+  local ok, err = xpcall(function()
+    shared_state.manual_updates[root] = true
+    package.loaded.gtags_adapter = nil
+    local reloaded_adapter = require("gtags_adapter")
+    reloaded_adapter.setup()
+
+    eq(false, reloaded_adapter.find("g"))
+    eq(before_calls, query_calls)
+    assert(notifications[#notifications].message:find(
+      "手动索引正在更新", 1, true))
+  end, debug.traceback)
+  shared_state.manual_updates[root] = nil
+  if not ok then error(err) end
 end)
 
 test("blocks automatic queries while Gutentags is running", function()

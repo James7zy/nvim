@@ -8,7 +8,8 @@ local root_markers = {
 local state = _G.NvimGutentagsHybridState or {}
 _G.NvimGutentagsHybridState = state
 
-local manual_updates = {}
+state.manual_updates = state.manual_updates or {}
+local manual_updates = state.manual_updates
 
 local function exists(path)
   return (vim.uv or vim.loop).fs_stat(path) ~= nil
@@ -149,6 +150,10 @@ local function query_term(kind)
   return vim.fn.expand((kind == "f" or kind == "i") and "<cfile>" or "<cword>")
 end
 
+local query_kinds = {
+  g = true, s = true, c = true, t = true, e = true, f = true, i = true,
+}
+
 local function split_quickfix(items)
   local locations, errors = {}, {}
   for _, item in ipairs(items) do
@@ -176,6 +181,10 @@ local function setup_keymaps()
 end
 
 function M.find(kind)
+  if not query_kinds[kind] then
+    notify("不支持的 GTAGS 查询类型: " .. tostring(kind), vim.log.levels.ERROR)
+    return false
+  end
   local context, context_error = current_context()
   if not context then
     notify(context_error, vim.log.levels.WARN)
@@ -211,9 +220,15 @@ function M.find(kind)
   local ok = pcall(vim.api.nvim_cmd, {
     cmd = "GscopeFind", args = { kind, term }, bang = true,
   }, {})
+  local shell_error = vim.v.shell_error
   if not ok then
     notify("GTAGS 查询失败；数据库: " .. context.database .. "；请查看 :messages",
       vim.log.levels.ERROR)
+    return false
+  end
+  if shell_error ~= 0 then
+    notify("GTAGS 查询失败（退出码 " .. shell_error .. "）；数据库: "
+      .. context.database .. "；请查看 :messages", vim.log.levels.ERROR)
     return false
   end
 
@@ -233,11 +248,15 @@ function M.find(kind)
     return true
   end
   local loaded, fzf = pcall(require, "fzf-lua")
-  if not loaded then
+  if not loaded or type(fzf) ~= "table" or type(fzf.quickfix) ~= "function" then
     notify("fzf-lua 不可用", vim.log.levels.ERROR)
     return false
   end
-  fzf.quickfix({ valid_only = true })
+  local opened = pcall(fzf.quickfix, { valid_only = true })
+  if not opened then
+    notify("fzf-lua quickfix 打开失败", vim.log.levels.ERROR)
+    return false
+  end
   return true
 end
 
