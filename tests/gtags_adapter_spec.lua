@@ -277,6 +277,197 @@ test("blocks trust when the boundary changes before observation", function()
   if not ok then error(err) end
 end)
 
+test("blocks overlapping same-root first-trust observers", function()
+  local root = temp_root .. "/overlapping-observers"
+  local source = root .. "/overlap.c"
+  local c1 = temp_root .. "/overlap-cache-1/GTAGS"
+  local c2 = temp_root .. "/overlap-cache-2/GTAGS"
+  vim.fn.mkdir(root .. "/.git", "p")
+  write(source, { "int overlapping_observer_symbol;" })
+  edit(source)
+
+  eq(1, guard(source))
+  local bufnr = vim.api.nvim_get_current_buf()
+  vim.b.gutentags_root = root
+  vim.b.gutentags_files = { gtags_cscope = c1 }
+  vim.g.test_gutentags_job_targets = { c1 }
+  vim.b.gutentags_files = { gtags_cscope = c2 }
+  eq(1, guard(source))
+  vim.wait(100)
+
+  local record = _G.NvimGutentagsHybridState.automatic_transitions[bufnr]
+  eq(true, type(record) == "table" and record.invalid_setup == true)
+  eq(nil, record.trusted)
+
+  write(root .. "/GTAGS", { "manual database" })
+  local old_path = vim.env.PATH
+  local ok, err = xpcall(function()
+    vim.env.PATH = "/definitely-missing"
+    eq(false, adapter.update())
+    vim.wait(100)
+    eq("automatic", vim.b.gutentags_hybrid_mode)
+    vim.g.test_gutentags_job_targets = {}
+    eq(false, adapter.update())
+    vim.wait(100)
+    eq("automatic", vim.b.gutentags_hybrid_mode)
+    eq(nil, record.trusted)
+  end, debug.traceback)
+  vim.env.PATH = old_path
+  vim.g.test_gutentags_job_targets = {}
+  if not ok then error(err) end
+end)
+
+test("observes a later target after first trust completes", function()
+  local root = temp_root .. "/serialized-observers"
+  local source = root .. "/serialized.c"
+  local c1 = temp_root .. "/serialized-cache-1/GTAGS"
+  local c2 = temp_root .. "/serialized-cache-2/GTAGS"
+  local c3 = temp_root .. "/serialized-cache-3/GTAGS"
+  vim.fn.mkdir(root .. "/.git", "p")
+  write(source, { "int serialized_observer_symbol;" })
+  edit(source)
+
+  eq(1, guard(source))
+  local bufnr = vim.api.nvim_get_current_buf()
+  vim.b.gutentags_root = root
+  vim.b.gutentags_files = { gtags_cscope = c1 }
+  wait_for_trusted_target(bufnr, c1)
+
+  vim.b.gutentags_files = { gtags_cscope = c2 }
+  eq(1, guard(source))
+  assert(vim.wait(1000, function()
+    local record = _G.NvimGutentagsHybridState.automatic_transitions[bufnr]
+    return type(record) == "table"
+      and type(record.candidate) == "table"
+      and record.candidate.target == c2
+  end, 10), "serialized observer did not retain the later candidate")
+  vim.b.gutentags_files = { gtags_cscope = c3 }
+  eq(1, guard(source))
+  assert(vim.wait(1000, function()
+    local current = _G.NvimGutentagsHybridState.automatic_transitions[bufnr]
+    return type(current) == "table"
+      and type(current.candidate) == "table"
+      and current.candidate.target == c3
+  end, 10), "serialized observer did not retain the final candidate")
+  local record = _G.NvimGutentagsHybridState.automatic_transitions[bufnr]
+  eq(c1, record.trusted.target)
+  eq({ [c1] = true, [c2] = true, [c3] = true }, record.targets)
+
+  write(root .. "/GTAGS", { "manual database" })
+  local old_path = vim.env.PATH
+  local ok, err = xpcall(function()
+    vim.env.PATH = "/definitely-missing"
+    vim.g.test_gutentags_job_targets = {}
+    eq(false, adapter.update())
+    vim.wait(100)
+    eq("automatic", vim.b.gutentags_hybrid_mode)
+    eq(false, adapter.update())
+    assert(vim.wait(1000, function()
+      return vim.b[bufnr].gutentags_hybrid_mode == "manual"
+    end, 10))
+  end, debug.traceback)
+  vim.env.PATH = old_path
+  if not ok then error(err) end
+end)
+
+test("blocks overlapping target observers after first trust", function()
+  local root = temp_root .. "/overlapping-trusted-observers"
+  local source = root .. "/trusted-overlap.c"
+  local c1 = temp_root .. "/trusted-overlap-cache-1/GTAGS"
+  local c2 = temp_root .. "/trusted-overlap-cache-2/GTAGS"
+  local c3 = temp_root .. "/trusted-overlap-cache-3/GTAGS"
+  vim.fn.mkdir(root .. "/.git", "p")
+  write(source, { "int trusted_overlap_symbol;" })
+  edit(source)
+
+  eq(1, guard(source))
+  local bufnr = vim.api.nvim_get_current_buf()
+  vim.b.gutentags_root = root
+  vim.b.gutentags_files = { gtags_cscope = c1 }
+  wait_for_trusted_target(bufnr, c1)
+
+  vim.g.test_gutentags_job_targets = { c2 }
+  vim.b.gutentags_files = { gtags_cscope = c2 }
+  eq(1, guard(source))
+  vim.b.gutentags_files = { gtags_cscope = c3 }
+  eq(1, guard(source))
+  vim.wait(100)
+
+  local record = _G.NvimGutentagsHybridState.automatic_transitions[bufnr]
+  eq(true, record.observer_conflict)
+  eq(c1, record.trusted.target)
+  eq({ [c1] = true }, record.targets)
+
+  write(root .. "/GTAGS", { "manual database" })
+  local old_path = vim.env.PATH
+  local ok, err = xpcall(function()
+    vim.env.PATH = "/definitely-missing"
+    eq(false, adapter.update())
+    vim.wait(100)
+    eq("automatic", vim.b.gutentags_hybrid_mode)
+    vim.g.test_gutentags_job_targets = {}
+    eq(false, adapter.update())
+    vim.wait(100)
+    eq("automatic", vim.b.gutentags_hybrid_mode)
+    eq(true, record.observer_conflict)
+  end, debug.traceback)
+  vim.env.PATH = old_path
+  vim.g.test_gutentags_job_targets = {}
+  if not ok then error(err) end
+end)
+
+test("preserves pending observer conflicts across reload and wipeout", function()
+  local root = temp_root .. "/reload-pending-observer"
+  local source = root .. "/reload.c"
+  local c1 = temp_root .. "/reload-pending-cache-1/GTAGS"
+  local c2 = temp_root .. "/reload-pending-cache-2/GTAGS"
+  vim.fn.mkdir(root .. "/.git", "p")
+  write(source, { "int reload_pending_symbol;" })
+  edit(source)
+
+  eq(1, guard(source))
+  local bufnr = vim.api.nvim_get_current_buf()
+  vim.b.gutentags_root = root
+  vim.b.gutentags_files = { gtags_cscope = c1 }
+  local shared_state = _G.NvimGutentagsHybridState
+  assert(type(shared_state.automatic_observers) == "table")
+  eq(true, shared_state.automatic_observers[bufnr].pending)
+
+  package.loaded.gtags_adapter = nil
+  require("gtags_adapter").setup()
+  eq(true, shared_state.automatic_observers[bufnr].pending)
+  vim.b.gutentags_files = { gtags_cscope = c2 }
+  eq(1, guard(source))
+  vim.wait(100)
+  local record = shared_state.automatic_transitions[bufnr]
+  eq(true, type(record) == "table" and record.invalid_setup == true)
+  eq(nil, record.trusted)
+
+  package.loaded.gtags_adapter = nil
+  require("gtags_adapter").setup()
+  eq(true, shared_state.automatic_transitions[bufnr].invalid_setup)
+  vim.api.nvim_buf_delete(bufnr, { force = true })
+  eq(nil, shared_state.automatic_transitions[bufnr])
+  eq(nil, shared_state.automatic_observers[bufnr])
+end)
+
+test("does not create trust from current context while observer is pending", function()
+  local root = temp_root .. "/pending-current-context"
+  local source = root .. "/pending.c"
+  local target = temp_root .. "/pending-current-cache/GTAGS"
+  vim.fn.mkdir(root .. "/.git", "p")
+  write(source, { "int pending_current_symbol;" })
+  edit(source)
+
+  eq(1, guard(source))
+  local bufnr = vim.api.nvim_get_current_buf()
+  vim.b.gutentags_root = root
+  vim.b.gutentags_files = { gtags_cscope = target }
+  eq(false, adapter.update())
+  eq(nil, _G.NvimGutentagsHybridState.automatic_transitions[bufnr])
+  wait_for_trusted_target(bufnr, target)
+end)
+
 test("defers a live manual transition until Gutentags work is quiescent", function()
   local root = temp_root .. "/live-manual-transition"
   local source = root .. "/transition.c"
@@ -366,7 +557,6 @@ test("defers rescan until automatic metadata is restored and quiescent", functio
   }
   vim.b.gutentags_root = root
   vim.b.gutentags_files = automatic_files
-  eq(1, guard(source))
   wait_for_trusted_target(bufnr, automatic_files.gtags_cscope)
   local writes = install_write_hooks(
     bufnr, "gtags_adapter_rescan_user_" .. bufnr
@@ -426,7 +616,6 @@ test("retains every migrated automatic target until exact adoption", function()
   local c3 = temp_root .. "/migration-cache-3/GTAGS"
   vim.b.gutentags_root = root
   vim.b.gutentags_files = { gtags_cscope = c1 }
-  eq(1, guard(source))
   wait_for_trusted_target(bufnr, c1)
   local writes = install_write_hooks(
     bufnr, "gtags_adapter_migration_user_" .. bufnr
@@ -487,7 +676,6 @@ test("restores trusted automatic metadata during a notags rescan", function()
   }
   vim.b.gutentags_root = root
   vim.b.gutentags_files = cache_files
-  eq(1, guard(source))
   wait_for_trusted_target(bufnr, cache_files.gtags_cscope)
   local writes = install_write_hooks(
     bufnr, "gtags_adapter_notags_user_" .. bufnr
@@ -932,7 +1120,6 @@ test("cleans automatic transition state on wipeout after reload", function()
   vim.b.gutentags_files = {
     gtags_cscope = temp_root .. "/wipeout-cache/GTAGS",
   }
-  eq(1, guard(source))
   wait_for_trusted_target(bufnr, vim.b.gutentags_files.gtags_cscope)
   local shared_state = _G.NvimGutentagsHybridState
   assert(type(shared_state.automatic_transitions) == "table")

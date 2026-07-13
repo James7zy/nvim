@@ -21,6 +21,10 @@ if legacy_automatic_metadata ~= nil
     and type(legacy_automatic_metadata) ~= "table" then
   automatic_transition_state_invalid = true
 end
+if state.automatic_observers ~= nil
+    and type(state.automatic_observers) ~= "table" then
+  automatic_transition_state_invalid = true
+end
 if automatic_transition_state_invalid then
   state.automatic_transitions_invalid = true
 end
@@ -28,6 +32,10 @@ if type(state.automatic_transitions) ~= "table" then
   state.automatic_transitions = {}
 end
 local automatic_transition_state = state.automatic_transitions
+if type(state.automatic_observers) ~= "table" then
+  state.automatic_observers = {}
+end
+local automatic_observer_state = state.automatic_observers
 
 local function exists(path)
   return (vim.uv or vim.loop).fs_stat(path) ~= nil
@@ -129,6 +137,7 @@ local function valid_automatic_record(record)
   if type(record) ~= "table"
       or not nonempty_string(record.path)
       or not nonempty_string(record.hybrid_root)
+      or record.observer_conflict ~= nil
       or not valid_automatic_snapshot(record.trusted)
       or record.candidate ~= nil
         and not valid_automatic_snapshot(record.candidate)
@@ -244,6 +253,14 @@ local function stable_automatic_identity(bufnr, path, context)
     and vim.deep_equal(classify(path), context)
 end
 
+local function valid_automatic_observer(observer)
+  return type(observer) == "table"
+    and type(observer.generation) == "number"
+    and observer.generation >= 1
+    and observer.generation % 1 == 0
+    and type(observer.pending) == "boolean"
+end
+
 local function observe_stable_automatic_metadata(bufnr, path, context)
   if not stable_automatic_identity(bufnr, path, context) then
     return nil
@@ -252,30 +269,78 @@ local function observe_stable_automatic_metadata(bufnr, path, context)
   if not metadata or metadata.root ~= context.root then
     return nil
   end
+  if automatic_transition_state[bufnr] == nil then
+    local observer = automatic_observer_state[bufnr]
+    if observer ~= nil
+        and (not valid_automatic_observer(observer) or observer.pending) then
+      return nil
+    end
+  end
   return observe_automatic_metadata(bufnr, metadata, true)
 end
 
-local function block_initial_automatic_trust(bufnr)
-  if automatic_transition_state[bufnr] == nil then
+local function block_automatic_observation(bufnr)
+  local record = automatic_transition_state[bufnr]
+  if record == nil then
     automatic_transition_state[bufnr] = { invalid_setup = true }
+  elseif valid_automatic_record(record) then
+    record.observer_conflict = true
   end
 end
 
 local function schedule_automatic_metadata_observer(bufnr, path, context)
+  if automatic_transition_state_invalid
+      or not vim.api.nvim_buf_is_valid(bufnr) then
+    return
+  end
   context = vim.deepcopy(context)
+  local buffer = vim.b[bufnr]
+  local record = automatic_transition_state[bufnr]
+  local observer = automatic_observer_state[bufnr]
+  if observer ~= nil and not valid_automatic_observer(observer) then
+    block_automatic_observation(bufnr)
+    return
+  end
+  if observer and observer.pending then
+    observer.generation = observer.generation + 1
+    observer.pending = false
+    block_automatic_observation(bufnr)
+    return
+  end
+  local allow_create = record == nil
+  if not allow_create and not automatic_record_matches(
+      record, bufnr, path, buffer.gutentags_hybrid_root) then
+    return
+  end
+  local generation = (observer and observer.generation or 0) + 1
+  automatic_observer_state[bufnr] = {
+    generation = generation,
+    pending = true,
+  }
   vim.schedule(function()
     if automatic_transition_state_invalid
         or not vim.api.nvim_buf_is_valid(bufnr) then
       return
     end
+    local current_observer = automatic_observer_state[bufnr]
+    if not valid_automatic_observer(current_observer)
+        or not current_observer.pending
+        or current_observer.generation ~= generation then
+      return
+    end
     local buffer = vim.b[bufnr]
     if not stable_automatic_identity(bufnr, path, context) then
+      current_observer.pending = false
       if buffer.gutentags_hybrid_mode == "automatic" then
-        block_initial_automatic_trust(bufnr)
+        block_automatic_observation(bufnr)
       end
       return
     end
-    observe_stable_automatic_metadata(bufnr, path, context)
+    local metadata = automatic_metadata(bufnr)
+    if metadata and metadata.root == context.root then
+      observe_automatic_metadata(bufnr, metadata, allow_create)
+    end
+    current_observer.pending = false
   end)
 end
 
@@ -756,6 +821,7 @@ function M.setup()
     group = cleanup_group,
     callback = function(args)
       automatic_transition_state[args.buf] = nil
+      automatic_observer_state[args.buf] = nil
     end,
   })
 
