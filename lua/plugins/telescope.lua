@@ -62,8 +62,9 @@ return {
 
     -- 注意：<leader>f*（ff/ft/fb/fg/fc/frb/frc）这套搜索键已移交给 fzf-lua
     -- （见 lua/plugins/fzf-lua.lua）——fzf-lua 把搜索/排序外包给独立 fzf 进程，
-    -- 在树莓派这类弱主机上更轻快。telescope 本体在此保留，因为 gtags 跳转
-    -- （cscope_maps，gtags.lua）和 aerial 大纲（aerial.lua）仍以它作为 picker。
+    -- 在树莓派这类弱主机上更轻快。
+    -- telescope 本体保留，因为 aerial 大纲仍以它作为 picker。
+    -- GTAGS 查询结果已经由 gtags_adapter 转交给 fzf-lua。
     -- 上面的 setup（disable_devicons / <C-o> 切预览 / file_ignore_patterns）
     -- 对这些保留的 telescope 入口依然生效。
     --
