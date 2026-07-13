@@ -252,6 +252,65 @@ test("defers a live manual transition until Gutentags work is quiescent", functi
   if not ok then error(err) end
 end)
 
+test("defers rescan until automatic metadata is restored and quiescent", function()
+  local root = temp_root .. "/rescan-transition"
+  local source = root .. "/rescan.c"
+  vim.fn.mkdir(root .. "/.git", "p")
+  write(source, { "int rescan_symbol;" })
+  edit(source)
+
+  eq(1, guard(source))
+  local bufnr = vim.api.nvim_get_current_buf()
+  local automatic_files = {
+    gtags_cscope = temp_root .. "/rescan-cache/GTAGS",
+  }
+  vim.b.gutentags_root = root
+  vim.b.gutentags_files = automatic_files
+  eq(1, guard(source))
+  local writes = install_write_hooks(
+    bufnr, "gtags_adapter_rescan_user_" .. bufnr
+  )
+  write(root .. "/GTAGS", { "manual database" })
+
+  vim.g.test_gutentags_jobs = { "gtags_cscope" }
+  vim.b.gutentags_files = nil
+  eq(1, guard(source))
+  eq("automatic", vim.b.gutentags_hybrid_mode)
+  eq(root, vim.b.gutentags_root)
+  eq(nil, vim.b.gutentags_files)
+  vim.b.gutentags_files = automatic_files
+  vim.wait(100)
+  eq("automatic", vim.b.gutentags_hybrid_mode)
+  eq(automatic_files, vim.b.gutentags_files)
+  vim.api.nvim_exec_autocmds("BufWritePost", { buffer = bufnr })
+  eq({ gutentags = 1, user = 1 }, writes)
+
+  vim.g.test_gutentags_jobs = {}
+  vim.b.gutentags_files = nil
+  eq(1, guard(source))
+  local wrong_files = {
+    gtags_cscope = temp_root .. "/wrong-rescan-cache/GTAGS",
+  }
+  vim.b.gutentags_files = wrong_files
+  vim.wait(100)
+  eq("automatic", vim.b.gutentags_hybrid_mode)
+  eq(wrong_files, vim.b.gutentags_files)
+  vim.b.gutentags_files = automatic_files
+  vim.wait(20)
+  eq("automatic", vim.b.gutentags_hybrid_mode)
+
+  vim.b.gutentags_files = nil
+  eq(1, guard(source))
+  vim.b.gutentags_files = automatic_files
+  assert(vim.wait(1000, function()
+    return vim.b[bufnr].gutentags_hybrid_mode == "manual"
+  end, 10))
+  eq(root .. "/GTAGS", vim.b.gutentags_files.gtags_cscope)
+  vim.api.nvim_exec_autocmds("BufWritePost", { buffer = bufnr })
+  eq({ gutentags = 1, user = 2 }, writes)
+  vim.g.test_gutentags_jobs = {}
+end)
+
 test("keeps hybrid ownership when a chained hook switches buffers", function()
   local target_root = temp_root .. "/hook-switch-target"
   local target_source = target_root .. "/target.c"
@@ -288,7 +347,14 @@ test("keeps hybrid ownership when a chained hook switches buffers", function()
   local ok, result = pcall(guard, target_source)
   existing_hook_switch_to = nil
   assert(ok, result)
-  eq(0, result)
+  eq(1, result)
+  eq("automatic", vim.b[target_buf].gutentags_hybrid_mode)
+  eq(target_files, vim.b[target_buf].gutentags_files)
+  eq("automatic", vim.b[other_buf].gutentags_hybrid_mode)
+  eq(other_files, vim.b[other_buf].gutentags_files)
+  assert(vim.wait(1000, function()
+    return vim.b[target_buf].gutentags_hybrid_mode == "manual"
+  end, 10))
   eq("manual", vim.b[target_buf].gutentags_hybrid_mode)
   eq(target_root, vim.b[target_buf].gutentags_root)
   eq(target_root .. "/GTAGS",

@@ -10,6 +10,8 @@ _G.NvimGutentagsHybridState = state
 
 state.manual_updates = state.manual_updates or {}
 local manual_updates = state.manual_updates
+state.automatic_metadata = state.automatic_metadata or {}
+local automatic_metadata_state = state.automatic_metadata
 
 local function exists(path)
   return (vim.uv or vim.loop).fs_stat(path) ~= nil
@@ -64,8 +66,38 @@ local function refreshed_files(before_files, after_files)
   return refreshed
 end
 
-local function automatic_update_running(bufnr)
+local function automatic_metadata(bufnr)
   if not vim.api.nvim_buf_is_valid(bufnr) then
+    return nil
+  end
+  local buffer = vim.b[bufnr]
+  local files = buffer.gutentags_files
+  local target = type(files) == "table" and files.gtags_cscope or nil
+  if type(buffer.gutentags_root) ~= "string" or buffer.gutentags_root == ""
+      or type(files) ~= "table"
+      or type(target) ~= "string" or target == "" then
+    return nil
+  end
+  return { files = files, root = buffer.gutentags_root, target = target }
+end
+
+local function remember_automatic_metadata(bufnr)
+  local metadata = automatic_metadata(bufnr)
+  local buffer = vim.b[bufnr]
+  if buffer.gutentags_hybrid_mode ~= "automatic" or not metadata then
+    return
+  end
+  automatic_metadata_state[bufnr] = {
+    files = vim.deepcopy(metadata.files),
+    hybrid_root = buffer.gutentags_hybrid_root,
+    path = vim.api.nvim_buf_get_name(bufnr),
+    root = metadata.root,
+    target = metadata.target,
+  }
+end
+
+local function automatic_update_running(bufnr)
+  if not automatic_metadata(bufnr) then
     return true
   end
   local ok, jobs = pcall(vim.api.nvim_buf_call, bufnr, function()
@@ -97,13 +129,14 @@ end
 local transition_retry_message =
   "Gutentags 自动索引尚未安全退出；请稍后重试"
 
-local function apply_context(bufnr, context, hook_changes)
+local function apply_context(bufnr, context, hook_changes, coordinated)
   local buffer = vim.b[bufnr]
   local previous_mode = buffer.gutentags_hybrid_mode
   local previous_root = buffer.gutentags_hybrid_root
-  if previous_mode == "automatic" and context.mode ~= "automatic"
-      and automatic_update_running(bufnr) then
-    return false, transition_retry_message
+  if previous_mode == "automatic" and context.mode ~= "automatic" then
+    if not coordinated or automatic_update_running(bufnr) then
+      return false, transition_retry_message
+    end
   end
   if context.mode ~= "automatic" then
     detach_gutentags_write_hook(bufnr)
@@ -127,6 +160,11 @@ local function apply_context(bufnr, context, hook_changes)
   buffer.gutentags_hybrid_mode = context.mode
   buffer.gutentags_hybrid_root = context.root
   if context.mode ~= "manual" then
+    if context.mode == "automatic" then
+      remember_automatic_metadata(bufnr)
+    else
+      automatic_metadata_state[bufnr] = nil
+    end
     return true
   end
   local files = type(buffer.gutentags_files) == "table"
@@ -134,11 +172,21 @@ local function apply_context(bufnr, context, hook_changes)
   files.gtags_cscope = context.database
   buffer.gutentags_root = context.root
   buffer.gutentags_files = files
+  automatic_metadata_state[bufnr] = nil
   return true
 end
 
+local schedule_context_transition
+
 local function hybrid_guard(bufnr, path, hook_changes)
   local context = classify(path)
+  if vim.b[bufnr].gutentags_hybrid_mode == "automatic"
+      and context.mode ~= "automatic" then
+    schedule_context_transition(bufnr, path, context, {
+      allow_metadata_restore = automatic_metadata(bufnr) == nil,
+    })
+    return 1
+  end
   local applied = apply_context(bufnr, context, hook_changes)
   if not applied then
     return 1
@@ -150,15 +198,27 @@ local function notify(message, level)
   vim.notify(message, level or vim.log.levels.INFO, { title = "GTAGS" })
 end
 
-local function schedule_context_transition(bufnr, path, context)
+schedule_context_transition = function(bufnr, path, context, options)
+  options = options or {}
   local buffer = vim.b[bufnr]
+  local metadata = automatic_metadata(bufnr)
+  local remembered = automatic_metadata_state[bufnr]
+  if type(remembered) ~= "table" or remembered.path ~= path
+      or remembered.hybrid_root ~= buffer.gutentags_hybrid_root then
+    remembered = nil
+  end
   local snapshot = {
-    gutentags_files = type(buffer.gutentags_files) == "table"
-        and vim.deepcopy(buffer.gutentags_files) or buffer.gutentags_files,
     gutentags_hybrid_mode = buffer.gutentags_hybrid_mode,
     gutentags_hybrid_root = buffer.gutentags_hybrid_root,
     gutentags_root = buffer.gutentags_root,
+    metadata = metadata and {
+      files = vim.deepcopy(metadata.files),
+      root = metadata.root,
+      target = metadata.target,
+    } or nil,
+    remembered = remembered and vim.deepcopy(remembered) or nil,
   }
+  context = vim.deepcopy(context)
   vim.schedule(function()
     if not vim.api.nvim_buf_is_valid(bufnr)
         or vim.api.nvim_buf_get_name(bufnr) ~= path then
@@ -167,13 +227,46 @@ local function schedule_context_transition(bufnr, path, context)
     local current = vim.b[bufnr]
     if current.gutentags_hybrid_mode ~= snapshot.gutentags_hybrid_mode
         or current.gutentags_hybrid_root ~= snapshot.gutentags_hybrid_root
-        or current.gutentags_root ~= snapshot.gutentags_root
-        or not vim.deep_equal(current.gutentags_files,
-          snapshot.gutentags_files)
         or not vim.deep_equal(classify(path), context) then
       return
     end
-    apply_context(bufnr, context)
+    local current_metadata = automatic_metadata(bufnr)
+    if not current_metadata then
+      return
+    end
+    if snapshot.metadata then
+      if current_metadata.root ~= snapshot.metadata.root
+          or current_metadata.target ~= snapshot.metadata.target
+          or not vim.deep_equal(current_metadata.files,
+            snapshot.metadata.files) then
+        return
+      end
+    elseif not options.allow_metadata_restore then
+      return
+    else
+      local expected_root = type(snapshot.gutentags_root) == "string"
+          and snapshot.gutentags_root ~= ""
+          and snapshot.gutentags_root or snapshot.gutentags_hybrid_root
+      if current_metadata.root ~= expected_root
+          or type(context.database) == "string"
+            and current_metadata.target == context.database then
+        return
+      end
+      if not snapshot.remembered then
+        remember_automatic_metadata(bufnr)
+        return
+      end
+      if current_metadata.root ~= snapshot.remembered.root
+          or current_metadata.target ~= snapshot.remembered.target
+          or not vim.deep_equal(current_metadata.files,
+            snapshot.remembered.files) then
+        return
+      end
+    end
+    if automatic_update_running(bufnr) then
+      return
+    end
+    apply_context(bufnr, context, nil, true)
   end)
 end
 

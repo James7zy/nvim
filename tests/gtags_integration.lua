@@ -273,6 +273,19 @@ local function run()
   assert(vim.fn.search("auto_symbol", "cw") > 0,
     "automatic symbol is missing before live reclassification")
   cursor_on("auto_symbol")
+  vim.fn["gutentags#rescan"]()
+  assert(vim.b.gutentags_hybrid_mode == "automatic",
+    "active rescan changed the hybrid mode")
+  assert(vim.b.gutentags_root == automatic_root,
+    "active rescan changed the automatic root")
+  assert(vim.deep_equal(vim.b.gutentags_files, automatic_files),
+    "active rescan did not restore automatic cache metadata")
+  vim.wait(100)
+  assert(vim.b.gutentags_hybrid_mode == "automatic",
+    "scheduled active rescan changed the hybrid mode")
+  assert(vim.deep_equal(vim.b.gutentags_files, automatic_files),
+    "scheduled active rescan changed automatic cache metadata")
+
   local transition_notifications = {}
   local original_notify = vim.notify
   vim.notify = function(message, level)
@@ -302,6 +315,29 @@ local function run()
   assert(#write_hooks == 1,
     "deferred transition detached the automatic write hook")
 
+  local gap_rescans = 0
+  local gap_snapshot
+  local gap_group = vim.api.nvim_create_augroup(
+    "gtags_integration_rescan_gap", { clear = true }
+  )
+  vim.api.nvim_create_autocmd("User", {
+    group = gap_group,
+    pattern = "GutentagsUpdated",
+    callback = function()
+      if gap_rescans > 0 then
+        return
+      end
+      gap_rescans = gap_rescans + 1
+      vim.api.nvim_buf_call(auto_buf, function()
+        vim.fn["gutentags#rescan"]()
+        gap_snapshot = {
+          files = vim.deepcopy(vim.b.gutentags_files),
+          mode = vim.b.gutentags_hybrid_mode,
+          root = vim.b.gutentags_root,
+        }
+      end)
+    end,
+  })
   local updates_before_release = auto_updates
   vim.g.gutentags_gtags_executable = original_gtags_executable
   write(blocked_gtags_release, {})
@@ -310,6 +346,18 @@ local function run()
     return auto_updates >= updates_before_release + 2
       and type(current) == "table" and #current == 0
   end, 50), "blocked and queued automatic GTAGS updates did not drain")
+  assert(gap_rescans == 1, "queued replay did not exercise rescan completion gap")
+  assert(gap_snapshot.mode == "automatic",
+    "completion-gap rescan changed the hybrid mode")
+  assert(gap_snapshot.root == automatic_root,
+    "completion-gap rescan changed the automatic root")
+  assert(vim.deep_equal(gap_snapshot.files, automatic_files),
+    "completion-gap rescan did not restore automatic cache metadata")
+  assert(vim.b.gutentags_hybrid_mode == "automatic",
+    "queued replay completion changed the hybrid mode")
+  assert(vim.deep_equal(vim.b.gutentags_files, automatic_files),
+    "queued replay completion changed automatic cache metadata")
+  pcall(vim.api.nvim_del_augroup_by_name, "gtags_integration_rescan_gap")
   release_blocked_gtags()
   blocked_gtags_release = nil
 
