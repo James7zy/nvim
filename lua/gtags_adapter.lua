@@ -64,9 +64,32 @@ local function refreshed_files(before_files, after_files)
   return refreshed
 end
 
+local function detach_gutentags_write_hook()
+  local bufnr = vim.api.nvim_get_current_buf()
+  local group_name = "gutentags_buffer_" .. bufnr
+  -- Legacy Vimscript autocmds have no API id, so clear Gutentags' owned tuple.
+  local autocmds = vim.api.nvim_get_autocmds({
+    event = "BufWritePost",
+    buffer = bufnr,
+  })
+  for _, autocmd in ipairs(autocmds) do
+    if autocmd.group_name == group_name then
+      vim.api.nvim_clear_autocmds({
+        group = autocmd.group,
+        event = "BufWritePost",
+        buffer = bufnr,
+      })
+      return
+    end
+  end
+end
+
 local function apply_context(context, hook_changes)
   local previous_mode = vim.b.gutentags_hybrid_mode
   local previous_root = vim.b.gutentags_hybrid_root
+  if context.mode ~= "automatic" then
+    detach_gutentags_write_hook()
+  end
   local clear_unconditionally = context.mode == "disabled"
     or context.mode == "unconfigured"
   local must_clear = clear_unconditionally

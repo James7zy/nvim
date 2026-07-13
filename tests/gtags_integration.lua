@@ -169,9 +169,14 @@ local function run()
   })
   make_newer(auto_source, auto_db)
   local auto_updates = 0
+  local auto_update_starts = 0
   vim.api.nvim_create_autocmd("User", {
     pattern = "GutentagsUpdated",
     callback = function() auto_updates = auto_updates + 1 end,
+  })
+  vim.api.nvim_create_autocmd("User", {
+    pattern = "GutentagsUpdating",
+    callback = function() auto_update_starts = auto_update_starts + 1 end,
   })
   local auto_update_started
   vim.api.nvim_buf_call(auto_buf, function()
@@ -192,6 +197,41 @@ local function run()
   cursor_on("auto_updated_symbol")
   assert(require("gtags_adapter").find("g"))
   assert(vim.api.nvim_buf_get_name(0) == vim.fs.normalize(auto_source))
+
+  local live_manual_db = auto_root .. "/GTAGS"
+  local built = vim.system({ "gtags" }, { cwd = auto_root, text = true }):wait()
+  assert(built.code == 0, built.stderr)
+  vim.api.nvim_set_current_buf(auto_buf)
+  assert(vim.fn.search("auto_symbol", "cw") > 0,
+    "automatic symbol is missing before live reclassification")
+  cursor_on("auto_symbol")
+  assert(require("gtags_adapter").find("g"))
+  assert(vim.b.gutentags_hybrid_mode == "manual")
+  assert(vim.b.gutentags_files.gtags_cscope == live_manual_db)
+
+  local starts_before_save = auto_update_starts
+  local updates_before_save = auto_updates
+  vim.api.nvim_buf_set_lines(auto_buf, -1, -1, false, {
+    "int live_manual_saved_symbol(void) { return 6; }",
+  })
+  vim.cmd("silent write")
+  vim.wait(500)
+  local transitioned_jobs = jobs(auto_buf)
+  assert(type(transitioned_jobs) == "table" and #transitioned_jobs == 0,
+    "live manual buffer started a Gutentags job")
+  assert(auto_update_starts == starts_before_save,
+    "live manual buffer invoked the stale Gutentags save hook")
+  assert(auto_updates == updates_before_save,
+    "live manual buffer completed an automatic Gutentags update")
+  local stale_query = vim.system({ "global", "-x", "live_manual_saved_symbol" }, {
+    cwd = auto_root,
+    env = { GTAGSROOT = auto_root, GTAGSDBPATH = auto_root },
+    text = true,
+  }):wait()
+  assert(not (stale_query.stdout or ""):find(
+      "live_manual_saved_symbol", 1, true),
+    "automatic save hook updated the live manual database: "
+      .. (stale_query.stdout or ""))
 
   manual_root = temp_root .. "/manual"
   local manual_source = manual_root .. "/manual.c"

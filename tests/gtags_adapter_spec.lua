@@ -147,6 +147,46 @@ test("clears a stale manual database when the project mode changes", function()
   eq(nil, vim.b.gutentags_files)
 end)
 
+test("detaches Gutentags writes when a live buffer becomes manual", function()
+  local root = temp_root .. "/live-manual-transition"
+  local source = root .. "/transition.c"
+  vim.fn.mkdir(root .. "/.git", "p")
+  write(source, { "int transition_symbol;" })
+  edit(source)
+
+  eq(1, guard(source))
+  local bufnr = vim.api.nvim_get_current_buf()
+  vim.b.gutentags_root = root
+  vim.b.gutentags_files = { gtags_cscope = temp_root .. "/cache/GTAGS" }
+  local gutentags_writes = 0
+  local user_writes = 0
+  local gutentags_group = vim.api.nvim_create_augroup(
+    "gutentags_buffer_" .. bufnr, { clear = true }
+  )
+  vim.api.nvim_create_autocmd("BufWritePost", {
+    group = gutentags_group,
+    buffer = bufnr,
+    callback = function() gutentags_writes = gutentags_writes + 1 end,
+  })
+  local user_group = vim.api.nvim_create_augroup(
+    "gtags_adapter_user_" .. bufnr, { clear = true }
+  )
+  vim.api.nvim_create_autocmd("BufWritePost", {
+    group = user_group,
+    buffer = bufnr,
+    callback = function() user_writes = user_writes + 1 end,
+  })
+
+  write(root .. "/GTAGS", { "manual database" })
+  eq(0, guard(source))
+  eq("manual", vim.b.gutentags_hybrid_mode)
+  eq(root .. "/GTAGS", vim.b.gutentags_files.gtags_cscope)
+  vim.api.nvim_exec_autocmds("BufWritePost", { buffer = bufnr })
+
+  eq(0, gutentags_writes)
+  eq(1, user_writes)
+end)
+
 test("chains an existing Gutentags init hook", function()
   local root = temp_root .. "/existing-hook"
   local source = root .. "/hook.c"
