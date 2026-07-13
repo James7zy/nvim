@@ -468,6 +468,124 @@ test("does not create trust from current context while observer is pending", fun
   wait_for_trusted_target(bufnr, target)
 end)
 
+test("defers trusted current-context refresh to the pending observer", function()
+  local root = temp_root .. "/trusted-pending-current"
+  local source = root .. "/trusted-pending.c"
+  local c1 = temp_root .. "/trusted-pending-cache-1/GTAGS"
+  local c2 = temp_root .. "/trusted-pending-cache-2/GTAGS"
+  local c3 = temp_root .. "/trusted-pending-cache-3/GTAGS"
+  vim.fn.mkdir(root .. "/.git", "p")
+  write(source, { "int trusted_pending_current_symbol;" })
+  edit(source)
+
+  eq(1, guard(source))
+  local bufnr = vim.api.nvim_get_current_buf()
+  vim.b.gutentags_root = root
+  vim.b.gutentags_files = { gtags_cscope = c1 }
+  wait_for_trusted_target(bufnr, c1)
+
+  vim.b.gutentags_files = { gtags_cscope = c2 }
+  eq(1, guard(source))
+  eq(false, adapter.update())
+  local record = _G.NvimGutentagsHybridState.automatic_transitions[bufnr]
+  eq(c1, record.trusted.target)
+  eq(nil, record.candidate)
+  eq({ [c1] = true }, record.targets)
+
+  assert(vim.wait(1000, function()
+    return type(record.candidate) == "table" and record.candidate.target == c2
+  end, 10), "pending observer did not record C2")
+  eq({ [c1] = true, [c2] = true }, record.targets)
+
+  vim.b.gutentags_files = { gtags_cscope = c3 }
+  eq(false, adapter.update())
+  eq(c3, record.candidate.target)
+  eq({ [c1] = true, [c2] = true, [c3] = true }, record.targets)
+end)
+
+test("blocks malformed observer state during current-context refresh", function()
+  local root = temp_root .. "/malformed-current-observer"
+  local source = root .. "/malformed-current.c"
+  local c1 = temp_root .. "/malformed-current-cache-1/GTAGS"
+  local c2 = temp_root .. "/malformed-current-cache-2/GTAGS"
+  vim.fn.mkdir(root .. "/.git", "p")
+  write(source, { "int malformed_current_observer_symbol;" })
+  edit(source)
+
+  eq(1, guard(source))
+  local bufnr = vim.api.nvim_get_current_buf()
+  vim.b.gutentags_root = root
+  vim.b.gutentags_files = { gtags_cscope = c1 }
+  wait_for_trusted_target(bufnr, c1)
+  local state = _G.NvimGutentagsHybridState
+  local record = state.automatic_transitions[bufnr]
+  state.automatic_observers[bufnr] = "malformed"
+  vim.b.gutentags_files = { gtags_cscope = c2 }
+
+  eq(false, adapter.update())
+  eq(true, record.observer_conflict)
+  eq(c1, record.trusted.target)
+  eq(nil, record.candidate)
+  eq({ [c1] = true }, record.targets)
+  state.automatic_observers[bufnr] = nil
+end)
+
+test("blocks foreign-root metadata in scheduled observation", function()
+  local root = temp_root .. "/foreign-root-observer"
+  local foreign_root = temp_root .. "/foreign-root-observer-other"
+  local source = root .. "/foreign.c"
+  local c1 = temp_root .. "/foreign-root-cache-1/GTAGS"
+  local c2 = temp_root .. "/foreign-root-cache-2/GTAGS"
+  vim.fn.mkdir(root .. "/.git", "p")
+  write(source, { "int foreign_root_observer_symbol;" })
+  edit(source)
+
+  eq(1, guard(source))
+  local bufnr = vim.api.nvim_get_current_buf()
+  vim.b.gutentags_root = foreign_root
+  vim.b.gutentags_files = { gtags_cscope = c1 }
+  vim.g.test_gutentags_job_targets = { c1 }
+  vim.wait(100)
+  local record = _G.NvimGutentagsHybridState.automatic_transitions[bufnr]
+  eq(true, type(record) == "table" and record.invalid_setup == true)
+  eq(nil, record.trusted)
+
+  vim.b.gutentags_root = root
+  vim.b.gutentags_files = { gtags_cscope = c2 }
+  eq(1, guard(source))
+  vim.wait(100)
+  record = _G.NvimGutentagsHybridState.automatic_transitions[bufnr]
+  eq(true, type(record) == "table" and record.invalid_setup == true)
+  eq(nil, record.trusted)
+  vim.g.test_gutentags_job_targets = {}
+end)
+
+test("blocks foreign-root metadata in current-context refresh", function()
+  local root = temp_root .. "/foreign-root-current"
+  local foreign_root = temp_root .. "/foreign-root-current-other"
+  local source = root .. "/foreign-current.c"
+  local c1 = temp_root .. "/foreign-current-cache-1/GTAGS"
+  local c2 = temp_root .. "/foreign-current-cache-2/GTAGS"
+  vim.fn.mkdir(root .. "/.git", "p")
+  write(source, { "int foreign_root_current_symbol;" })
+  edit(source)
+
+  eq(1, guard(source))
+  local bufnr = vim.api.nvim_get_current_buf()
+  vim.b.gutentags_root = root
+  vim.b.gutentags_files = { gtags_cscope = c1 }
+  wait_for_trusted_target(bufnr, c1)
+  local record = _G.NvimGutentagsHybridState.automatic_transitions[bufnr]
+  vim.b.gutentags_root = foreign_root
+  vim.b.gutentags_files = { gtags_cscope = c2 }
+
+  eq(false, adapter.update())
+  eq(true, record.observer_conflict)
+  eq(c1, record.trusted.target)
+  eq(nil, record.candidate)
+  eq({ [c1] = true }, record.targets)
+end)
+
 test("defers a live manual transition until Gutentags work is quiescent", function()
   local root = temp_root .. "/live-manual-transition"
   local source = root .. "/transition.c"
@@ -1454,6 +1572,44 @@ test("installs the leader-g update map", function()
     eq(1, calls)
   end, debug.traceback)
   current_adapter.update = original_update
+  if not ok then error(err) end
+end)
+
+test("blocks stale observer callbacks after reload invalidates state", function()
+  local saved_state = _G.NvimGutentagsHybridState
+  local ok, err = xpcall(function()
+    local isolated_state = {
+      automatic_transitions = {},
+      manual_updates = {},
+    }
+    _G.NvimGutentagsHybridState = isolated_state
+    package.loaded.gtags_adapter = nil
+    require("gtags_adapter").setup()
+
+    local root = temp_root .. "/stale-observer-reload"
+    local source = root .. "/stale.c"
+    local target = temp_root .. "/stale-observer-cache/GTAGS"
+    vim.fn.mkdir(root .. "/.git", "p")
+    write(source, { "int stale_observer_symbol;" })
+    edit(source)
+    eq(1, guard(source))
+    local bufnr = vim.api.nvim_get_current_buf()
+    vim.b.gutentags_root = root
+    vim.b.gutentags_files = { gtags_cscope = target }
+    eq(true, isolated_state.automatic_observers[bufnr].pending)
+
+    isolated_state.automatic_metadata = "malformed"
+    package.loaded.gtags_adapter = nil
+    require("gtags_adapter").setup()
+    eq(true, isolated_state.automatic_transitions_invalid)
+    vim.wait(100)
+    eq(nil, isolated_state.automatic_transitions[bufnr])
+  end, debug.traceback)
+
+  _G.NvimGutentagsHybridState = saved_state
+  package.loaded.gtags_adapter = nil
+  adapter = require("gtags_adapter")
+  adapter.setup()
   if not ok then error(err) end
 end)
 

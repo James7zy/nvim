@@ -37,6 +37,11 @@ if type(state.automatic_observers) ~= "table" then
 end
 local automatic_observer_state = state.automatic_observers
 
+local function automatic_transition_state_is_invalid()
+  return automatic_transition_state_invalid
+    or state.automatic_transitions_invalid ~= nil
+end
+
 local function exists(path)
   return (vim.uv or vim.loop).fs_stat(path) ~= nil
 end
@@ -188,8 +193,19 @@ end
 
 migrate_legacy_automatic_metadata()
 
+local function valid_automatic_observer(observer)
+  return type(observer) == "table"
+    and type(observer.generation) == "number"
+    and observer.generation >= 1
+    and observer.generation % 1 == 0
+    and type(observer.pending) == "boolean"
+end
+
 local function automatic_record_matches(record, bufnr, path, hybrid_root)
-  return not automatic_transition_state_invalid
+  local observer = automatic_observer_state[bufnr]
+  return not automatic_transition_state_is_invalid()
+    and (observer == nil
+      or valid_automatic_observer(observer) and not observer.pending)
     and valid_automatic_record(record)
     and vim.api.nvim_buf_is_valid(bufnr)
     and vim.api.nvim_buf_get_name(bufnr) == path
@@ -199,7 +215,7 @@ end
 
 local function observe_automatic_metadata(bufnr, metadata, allow_create)
   metadata = metadata or automatic_metadata(bufnr)
-  if automatic_transition_state_invalid
+  if automatic_transition_state_is_invalid()
       or not vim.api.nvim_buf_is_valid(bufnr)
       or not valid_automatic_snapshot(metadata) then
     return nil
@@ -241,7 +257,7 @@ local function observe_automatic_metadata(bufnr, metadata, allow_create)
 end
 
 local function stable_automatic_identity(bufnr, path, context)
-  if automatic_transition_state_invalid
+  if automatic_transition_state_is_invalid()
       or not vim.api.nvim_buf_is_valid(bufnr)
       or vim.api.nvim_buf_get_name(bufnr) ~= path
       or type(context) ~= "table" or context.mode ~= "automatic" then
@@ -253,33 +269,34 @@ local function stable_automatic_identity(bufnr, path, context)
     and vim.deep_equal(classify(path), context)
 end
 
-local function valid_automatic_observer(observer)
-  return type(observer) == "table"
-    and type(observer.generation) == "number"
-    and observer.generation >= 1
-    and observer.generation % 1 == 0
-    and type(observer.pending) == "boolean"
-end
+local block_automatic_observation
 
 local function observe_stable_automatic_metadata(bufnr, path, context)
   if not stable_automatic_identity(bufnr, path, context) then
     return nil
   end
-  local metadata = automatic_metadata(bufnr)
-  if not metadata or metadata.root ~= context.root then
-    return nil
-  end
-  if automatic_transition_state[bufnr] == nil then
-    local observer = automatic_observer_state[bufnr]
-    if observer ~= nil
-        and (not valid_automatic_observer(observer) or observer.pending) then
+  local observer = automatic_observer_state[bufnr]
+  if observer ~= nil then
+    if not valid_automatic_observer(observer) then
+      block_automatic_observation(bufnr)
       return nil
     end
+    if observer.pending then
+      return nil
+    end
+  end
+  local metadata = automatic_metadata(bufnr)
+  if not metadata then
+    return nil
+  end
+  if metadata.root ~= context.root then
+    block_automatic_observation(bufnr)
+    return nil
   end
   return observe_automatic_metadata(bufnr, metadata, true)
 end
 
-local function block_automatic_observation(bufnr)
+block_automatic_observation = function(bufnr)
   local record = automatic_transition_state[bufnr]
   if record == nil then
     automatic_transition_state[bufnr] = { invalid_setup = true }
@@ -289,7 +306,7 @@ local function block_automatic_observation(bufnr)
 end
 
 local function schedule_automatic_metadata_observer(bufnr, path, context)
-  if automatic_transition_state_invalid
+  if automatic_transition_state_is_invalid()
       or not vim.api.nvim_buf_is_valid(bufnr) then
     return
   end
@@ -318,7 +335,7 @@ local function schedule_automatic_metadata_observer(bufnr, path, context)
     pending = true,
   }
   vim.schedule(function()
-    if automatic_transition_state_invalid
+    if automatic_transition_state_is_invalid()
         or not vim.api.nvim_buf_is_valid(bufnr) then
       return
     end
@@ -337,8 +354,12 @@ local function schedule_automatic_metadata_observer(bufnr, path, context)
       return
     end
     local metadata = automatic_metadata(bufnr)
-    if metadata and metadata.root == context.root then
-      observe_automatic_metadata(bufnr, metadata, allow_create)
+    if metadata then
+      if metadata.root == context.root then
+        observe_automatic_metadata(bufnr, metadata, allow_create)
+      else
+        block_automatic_observation(bufnr)
+      end
     end
     current_observer.pending = false
   end)
