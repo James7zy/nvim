@@ -508,6 +508,173 @@ test("query maps dispatch through the reloaded adapter", function()
   if not ok then error(err) end
 end)
 
+test("dispatches automatic updates to the buffer-local Gutentags command", function()
+  local root = temp_root .. "/update-auto"
+  local source = root .. "/auto.c"
+  vim.fn.mkdir(root .. "/.git", "p")
+  write(source, { "int auto_update_symbol;" })
+  edit(source)
+  vim.b.gutentags_root = root
+  vim.b.gutentags_files = { gtags_cscope = temp_root .. "/cache/GTAGS" }
+  local calls = 0
+  pcall(vim.api.nvim_del_user_command, "GutentagsUpdate")
+  vim.api.nvim_create_user_command("GutentagsUpdate", function()
+    calls = calls + 1
+  end, {})
+
+  eq(true, adapter.update())
+  eq(1, calls)
+end)
+
+test("reports a throwing automatic update command", function()
+  local root = temp_root .. "/update-auto-failure"
+  local source = root .. "/auto.c"
+  vim.fn.mkdir(root .. "/.git", "p")
+  write(source, { "int auto_update_failure_symbol;" })
+  edit(source)
+  vim.b.gutentags_root = root
+  vim.b.gutentags_files = { gtags_cscope = temp_root .. "/cache/GTAGS" }
+  pcall(vim.api.nvim_del_user_command, "GutentagsUpdate")
+  vim.api.nvim_create_user_command("GutentagsUpdate", function()
+    error("automatic update failed")
+  end, {})
+
+  local ok, err = xpcall(function()
+    local before_notifications = #notifications
+    local call_ok, result = pcall(adapter.update)
+    eq(true, call_ok)
+    eq(false, result)
+    eq(before_notifications + 1, #notifications)
+    local notification = notifications[#notifications]
+    eq(vim.log.levels.ERROR, notification.level)
+    assert(notification.message:find("automatic update failed", 1, true))
+  end, debug.traceback)
+  pcall(vim.api.nvim_del_user_command, "GutentagsUpdate")
+  if not ok then error(err) end
+end)
+
+test("runs one asynchronous global update per manual project", function()
+  local root, source = manual_query_fixture("update-manual")
+  edit(source)
+  local old_system = vim.system
+  local calls = {}
+  local callback
+  vim.system = function(cmd, opts, cb)
+    calls[#calls + 1] = { cmd = cmd, opts = opts }
+    callback = cb
+    return { pid = 1234 }
+  end
+
+  local ok, err = xpcall(function()
+    eq(true, adapter.update())
+    eq(false, adapter.update())
+    eq(1, #calls)
+    eq({ "global", "-u" }, calls[1].cmd)
+    eq(root, calls[1].opts.cwd)
+    eq(root, calls[1].opts.env.GTAGSROOT)
+    eq(root, calls[1].opts.env.GTAGSDBPATH)
+    callback({ code = 0, stdout = "", stderr = "" })
+    assert(vim.wait(1000, function()
+      return notifications[#notifications].message:find("更新完成", 1, true) ~= nil
+    end))
+  end, debug.traceback)
+  vim.system = old_system
+  if not ok then error(err) end
+end)
+
+test("does not build automatically inside a disabled project", function()
+  local root = temp_root .. "/update-disabled"
+  local source = root .. "/disabled.c"
+  write(root .. "/.notags", {})
+  write(source, { "int disabled_update_symbol;" })
+  edit(source)
+
+  eq(false, adapter.update())
+  assert(notifications[#notifications].message:find("手动生成 GTAGS", 1, true))
+end)
+
+test("reports a failed manual global update", function()
+  local _, source = manual_query_fixture("update-failure")
+  edit(source)
+  local old_system = vim.system
+  local callback
+  vim.system = function(_, _, cb)
+    callback = cb
+    return { pid = 5678 }
+  end
+
+  local ok, err = xpcall(function()
+    eq(true, adapter.update())
+    callback({ code = 2, stdout = "", stderr = "database locked" })
+    assert(vim.wait(1000, function()
+      local last = notifications[#notifications]
+      return last and last.message:find("database locked", 1, true) ~= nil
+    end))
+  end, debug.traceback)
+  vim.system = old_system
+  if not ok then error(err) end
+end)
+
+test("releases the manual update lock when global fails to start", function()
+  local root, source = manual_query_fixture("update-launch-failure")
+  edit(source)
+  local old_system = vim.system
+  local calls = 0
+  local callback
+  vim.system = function(_, _, cb)
+    calls = calls + 1
+    if calls == 1 then
+      error("global launch failed")
+    end
+    callback = cb
+    return { pid = 9012 }
+  end
+
+  local ok, err = xpcall(function()
+    local before_notifications = #notifications
+    local call_ok, result = pcall(adapter.update)
+    eq(true, call_ok)
+    eq(false, result)
+    eq(before_notifications + 1, #notifications)
+    local notification = notifications[#notifications]
+    eq(vim.log.levels.ERROR, notification.level)
+    assert(notification.message:find("global launch failed", 1, true))
+
+    eq(true, adapter.update())
+    eq(2, calls)
+    callback({ code = 0, stdout = "", stderr = "" })
+    assert(vim.wait(1000, function()
+      return notifications[#notifications].message:find("更新完成", 1, true) ~= nil
+    end))
+  end, debug.traceback)
+  vim.system = old_system
+  _G.NvimGutentagsHybridState.manual_updates[root] = nil
+  if not ok then error(err) end
+end)
+
+test("checks gtags only for automatic updates", function()
+  local root = temp_root .. "/update-missing-gtags"
+  local source = root .. "/auto.c"
+  vim.fn.mkdir(root .. "/.git", "p")
+  write(source, { "int auto_update_symbol;" })
+  edit(source)
+  vim.b.gutentags_root = root
+  vim.b.gutentags_files = { gtags_cscope = temp_root .. "/missing-cache/GTAGS" }
+  local old_path = vim.env.PATH
+  local ok, err = xpcall(function()
+    vim.env.PATH = "/definitely-missing"
+    eq(false, adapter.update())
+    assert(notifications[#notifications].message:find("gtags", 1, true))
+  end, debug.traceback)
+  vim.env.PATH = old_path
+  if not ok then error(err) end
+end)
+
+test("installs the leader-g update map", function()
+  local mapping = vim.fn.maparg("<leader>gb", "n", false, true)
+  assert(type(mapping) == "table" and mapping.desc, "missing map <leader>gb")
+end)
+
 local function run()
   for _, item in ipairs(tests) do
     local ok, err = xpcall(item.fn, debug.traceback)

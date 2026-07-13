@@ -123,10 +123,10 @@ local function current_context()
     context.database = database
   end
   if context.mode == "disabled" then
-    return nil, context.root .. " 包含 .notags；请先手动生成 GTAGS"
+    return context, context.root .. " 包含 .notags；请先手动生成 GTAGS"
   end
   if context.mode == "unconfigured" then
-    return nil, "找不到项目根；请在项目根创建 .root"
+    return context, "找不到项目根；请在项目根创建 .root"
   end
   return context
 end
@@ -178,6 +178,9 @@ local function setup_keymaps()
       require("gtags_adapter").find(value[1])
     end, { silent = true, desc = "GTAGS: " .. value[2] })
   end
+  vim.keymap.set("n", "<leader>gb", function()
+    require("gtags_adapter").update()
+  end, { silent = true, desc = "GTAGS: 更新索引" })
 end
 
 function M.find(kind)
@@ -187,6 +190,10 @@ function M.find(kind)
   end
   local context, context_error = current_context()
   if not context then
+    notify(context_error, vim.log.levels.WARN)
+    return false
+  end
+  if context.mode == "disabled" or context.mode == "unconfigured" then
     notify(context_error, vim.log.levels.WARN)
     return false
   end
@@ -255,6 +262,77 @@ function M.find(kind)
   local opened = pcall(fzf.quickfix, { valid_only = true })
   if not opened then
     notify("fzf-lua quickfix 打开失败", vim.log.levels.ERROR)
+    return false
+  end
+  return true
+end
+
+function M.update()
+  local context, context_error = current_context()
+  if not context then
+    notify(context_error, vim.log.levels.WARN)
+    return false
+  end
+  if context.mode == "disabled" then
+    notify(context_error, vim.log.levels.WARN)
+    return false
+  end
+  if context.mode == "unconfigured" then
+    notify(context_error, vim.log.levels.WARN)
+    return false
+  end
+  if context.mode == "automatic" then
+    local missing = missing_tools({ "gtags" })
+    if #missing > 0 then
+      notify("缺少索引命令: gtags", vim.log.levels.ERROR)
+      return false
+    end
+    if vim.fn.exists(":GutentagsUpdate") ~= 2 then
+      notify("当前 buffer 没有 GutentagsUpdate 命令", vim.log.levels.ERROR)
+      return false
+    end
+    local ok, command_error = pcall(vim.api.nvim_cmd, {
+      cmd = "GutentagsUpdate",
+    }, {})
+    if not ok then
+      notify("Gutentags 更新启动失败: " .. tostring(command_error), vim.log.levels.ERROR)
+      return false
+    end
+    return true
+  end
+  if context.mode ~= "manual" then
+    notify(context_error or "请先手动生成 GTAGS", vim.log.levels.WARN)
+    return false
+  end
+  if vim.fn.executable("global") ~= 1 then
+    notify("缺少索引更新命令: global", vim.log.levels.ERROR)
+    return false
+  end
+  if manual_updates[context.root] then
+    notify("当前手动索引已经在更新", vim.log.levels.WARN)
+    return false
+  end
+
+  manual_updates[context.root] = true
+  local launched, launch_error = pcall(vim.system, { "global", "-u" }, {
+    cwd = context.root,
+    env = { GTAGSROOT = context.root, GTAGSDBPATH = context.root },
+    text = true,
+  }, function(result)
+    manual_updates[context.root] = nil
+    vim.schedule(function()
+      if result.code == 0 then
+        notify("手动 GTAGS 更新完成: " .. context.root)
+      else
+        local stderr = vim.trim(result.stderr or "")
+        notify("手动 GTAGS 更新失败 (exit " .. result.code .. ")"
+          .. (stderr ~= "" and (": " .. stderr) or ""), vim.log.levels.ERROR)
+      end
+    end)
+  end)
+  if not launched then
+    manual_updates[context.root] = nil
+    notify("手动 GTAGS 更新启动失败: " .. tostring(launch_error), vim.log.levels.ERROR)
     return false
   end
   return true
