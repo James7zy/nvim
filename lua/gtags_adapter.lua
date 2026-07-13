@@ -64,8 +64,18 @@ local function refreshed_files(before_files, after_files)
   return refreshed
 end
 
-local function detach_gutentags_write_hook()
-  local bufnr = vim.api.nvim_get_current_buf()
+local function automatic_update_running(bufnr)
+  if not vim.api.nvim_buf_is_valid(bufnr) then
+    return true
+  end
+  local ok, jobs = pcall(vim.api.nvim_buf_call, bufnr, function()
+    return vim.fn["gutentags#inprogress"]()
+  end)
+  return not ok or type(jobs) ~= "table"
+    or vim.tbl_contains(jobs, "gtags_cscope")
+end
+
+local function detach_gutentags_write_hook(bufnr)
   local group_name = "gutentags_buffer_" .. bufnr
   -- Legacy Vimscript autocmds have no API id, so clear Gutentags' owned tuple.
   local autocmds = vim.api.nvim_get_autocmds({
@@ -84,11 +94,19 @@ local function detach_gutentags_write_hook()
   end
 end
 
-local function apply_context(context, hook_changes)
-  local previous_mode = vim.b.gutentags_hybrid_mode
-  local previous_root = vim.b.gutentags_hybrid_root
+local transition_retry_message =
+  "Gutentags 自动索引尚未安全退出；请稍后重试"
+
+local function apply_context(bufnr, context, hook_changes)
+  local buffer = vim.b[bufnr]
+  local previous_mode = buffer.gutentags_hybrid_mode
+  local previous_root = buffer.gutentags_hybrid_root
+  if previous_mode == "automatic" and context.mode ~= "automatic"
+      and automatic_update_running(bufnr) then
+    return false, transition_retry_message
+  end
   if context.mode ~= "automatic" then
-    detach_gutentags_write_hook()
+    detach_gutentags_write_hook(bufnr)
   end
   local clear_unconditionally = context.mode == "disabled"
     or context.mode == "unconfigured"
@@ -97,35 +115,66 @@ local function apply_context(context, hook_changes)
     or (context.mode == "automatic" and previous_mode == "manual")
   if must_clear then
     if clear_unconditionally or not (hook_changes and hook_changes.gutentags_root) then
-      vim.b.gutentags_root = nil
+      buffer.gutentags_root = nil
     end
     local files = hook_changes and hook_changes.gutentags_files
     if clear_unconditionally or not files or not next(files) then
-      vim.b.gutentags_files = nil
+      buffer.gutentags_files = nil
     else
-      vim.b.gutentags_files = files
+      buffer.gutentags_files = files
     end
   end
-  vim.b.gutentags_hybrid_mode = context.mode
-  vim.b.gutentags_hybrid_root = context.root
+  buffer.gutentags_hybrid_mode = context.mode
+  buffer.gutentags_hybrid_root = context.root
   if context.mode ~= "manual" then
-    return
+    return true
   end
-  local files = type(vim.b.gutentags_files) == "table"
-      and vim.deepcopy(vim.b.gutentags_files) or {}
+  local files = type(buffer.gutentags_files) == "table"
+      and vim.deepcopy(buffer.gutentags_files) or {}
   files.gtags_cscope = context.database
-  vim.b.gutentags_root = context.root
-  vim.b.gutentags_files = files
+  buffer.gutentags_root = context.root
+  buffer.gutentags_files = files
+  return true
 end
 
-local function hybrid_guard(path, hook_changes)
+local function hybrid_guard(bufnr, path, hook_changes)
   local context = classify(path)
-  apply_context(context, hook_changes)
+  local applied = apply_context(bufnr, context, hook_changes)
+  if not applied then
+    return 1
+  end
   return (context.mode == "manual" or context.mode == "disabled") and 0 or 1
 end
 
 local function notify(message, level)
   vim.notify(message, level or vim.log.levels.INFO, { title = "GTAGS" })
+end
+
+local function schedule_context_transition(bufnr, path, context)
+  local buffer = vim.b[bufnr]
+  local snapshot = {
+    gutentags_files = type(buffer.gutentags_files) == "table"
+        and vim.deepcopy(buffer.gutentags_files) or buffer.gutentags_files,
+    gutentags_hybrid_mode = buffer.gutentags_hybrid_mode,
+    gutentags_hybrid_root = buffer.gutentags_hybrid_root,
+    gutentags_root = buffer.gutentags_root,
+  }
+  vim.schedule(function()
+    if not vim.api.nvim_buf_is_valid(bufnr)
+        or vim.api.nvim_buf_get_name(bufnr) ~= path then
+      return
+    end
+    local current = vim.b[bufnr]
+    if current.gutentags_hybrid_mode ~= snapshot.gutentags_hybrid_mode
+        or current.gutentags_hybrid_root ~= snapshot.gutentags_hybrid_root
+        or current.gutentags_root ~= snapshot.gutentags_root
+        or not vim.deep_equal(current.gutentags_files,
+          snapshot.gutentags_files)
+        or not vim.deep_equal(classify(path), context) then
+      return
+    end
+    apply_context(bufnr, context)
+  end)
 end
 
 local function current_context()
@@ -135,10 +184,19 @@ local function current_context()
     return nil, "当前 buffer 不是可查询的普通文件"
   end
   local context = classify(path)
-  apply_context(context)
+  if vim.b[bufnr].gutentags_hybrid_mode == "automatic"
+      and context.mode ~= "automatic" then
+    schedule_context_transition(bufnr, path, context)
+    return nil, transition_retry_message
+  end
+  local applied, apply_error = apply_context(bufnr, context)
+  if not applied then
+    return nil, apply_error
+  end
+  context.bufnr = bufnr
   if context.mode == "automatic" then
-    local files = vim.b.gutentags_files
-    context.root = vim.b.gutentags_root or context.root
+    local files = vim.b[bufnr].gutentags_files
+    context.root = vim.b[bufnr].gutentags_root or context.root
     context.database = type(files) == "table" and files.gtags_cscope or nil
   end
   if context.mode == "disabled" then
@@ -158,11 +216,6 @@ local function missing_tools(tools)
     end
   end
   return missing
-end
-
-local function automatic_update_running()
-  local ok, jobs = pcall(vim.fn["gutentags#inprogress"])
-  return ok and type(jobs) == "table" and vim.tbl_contains(jobs, "gtags_cscope")
 end
 
 local function query_term(kind)
@@ -226,7 +279,7 @@ function M.find(kind)
     notify("缺少查询命令: " .. table.concat(missing, ", "), vim.log.levels.ERROR)
     return false
   end
-  if context.mode == "automatic" and automatic_update_running() then
+  if context.mode == "automatic" and automatic_update_running(context.bufnr) then
     notify("Gutentags 正在生成或更新索引，请稍后再查询", vim.log.levels.WARN)
     return false
   end
@@ -371,24 +424,30 @@ function M.setup()
   end
 
   _G.NvimGutentagsHybridGuard = function(path)
+    local target_bufnr = vim.api.nvim_get_current_buf()
     if type(state.previous_init_hook) == "string"
         and state.previous_init_hook ~= ""
         and state.previous_init_hook ~= "GutentagsHybridGuard" then
-      local before_root = vim.b.gutentags_root
-      local before_files = vim.b.gutentags_files
+      local before_root = vim.b[target_bufnr].gutentags_root
+      local before_files = vim.b[target_bufnr].gutentags_files
       if type(before_files) == "table" then
         before_files = vim.deepcopy(before_files)
       end
-      local ok, allowed = pcall(vim.fn.call, state.previous_init_hook, { path })
-      if not ok or vim.fn.empty(allowed) == 1 then
+      local ok, allowed = pcall(vim.api.nvim_buf_call, target_bufnr, function()
+        return vim.fn.call(state.previous_init_hook, { path })
+      end)
+      if not ok or not vim.api.nvim_buf_is_valid(target_bufnr)
+          or vim.fn.empty(allowed) == 1 then
         return 0
       end
-      return hybrid_guard(path, {
-        gutentags_files = refreshed_files(before_files, vim.b.gutentags_files),
-        gutentags_root = not vim.deep_equal(before_root, vim.b.gutentags_root),
+      local after_files = vim.b[target_bufnr].gutentags_files
+      return hybrid_guard(target_bufnr, path, {
+        gutentags_files = refreshed_files(before_files, after_files),
+        gutentags_root = not vim.deep_equal(
+          before_root, vim.b[target_bufnr].gutentags_root),
       })
     end
-    return hybrid_guard(path)
+    return hybrid_guard(target_bufnr, path)
   end
 
   if state.configured then

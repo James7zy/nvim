@@ -33,12 +33,16 @@ end
 
 local existing_hook_calls = 0
 local existing_hook_update
+local existing_hook_switch_to
 vim.g.existing_gutentags_hook_result = 1
 _G.ExistingGutentagsHook = function(path)
   existing_hook_calls = existing_hook_calls + 1
   if existing_hook_update and path == existing_hook_update.path then
     vim.b.gutentags_root = existing_hook_update.root
     vim.b.gutentags_files = vim.deepcopy(existing_hook_update.files)
+  end
+  if existing_hook_switch_to then
+    vim.api.nvim_set_current_buf(existing_hook_switch_to)
   end
   return vim.g.existing_gutentags_hook_result
 end
@@ -54,6 +58,33 @@ adapter.setup()
 
 local function guard(path)
   return vim.fn.call(vim.g.gutentags_init_user_func, { path })
+end
+
+write(temp_root .. "/autoload/gutentags.vim", {
+  "function! gutentags#inprogress() abort",
+  "  return get(g:, 'test_gutentags_jobs', [])",
+  "endfunction",
+})
+vim.opt.runtimepath:prepend(temp_root)
+vim.g.test_gutentags_jobs = {}
+
+local function install_write_hooks(bufnr, user_group_name)
+  local calls = { gutentags = 0, user = 0 }
+  local gutentags_group = vim.api.nvim_create_augroup(
+    "gutentags_buffer_" .. bufnr, { clear = true }
+  )
+  vim.api.nvim_create_autocmd("BufWritePost", {
+    group = gutentags_group,
+    buffer = bufnr,
+    callback = function() calls.gutentags = calls.gutentags + 1 end,
+  })
+  local user_group = vim.api.nvim_create_augroup(user_group_name, { clear = true })
+  vim.api.nvim_create_autocmd("BufWritePost", {
+    group = user_group,
+    buffer = bufnr,
+    callback = function() calls.user = calls.user + 1 end,
+  })
+  return calls
 end
 
 test("uses an in-tree GTAGS database and vetoes automatic indexing", function()
@@ -147,7 +178,7 @@ test("clears a stale manual database when the project mode changes", function()
   eq(nil, vim.b.gutentags_files)
 end)
 
-test("detaches Gutentags writes when a live buffer becomes manual", function()
+test("defers a live manual transition until Gutentags work is quiescent", function()
   local root = temp_root .. "/live-manual-transition"
   local source = root .. "/transition.c"
   vim.fn.mkdir(root .. "/.git", "p")
@@ -157,34 +188,119 @@ test("detaches Gutentags writes when a live buffer becomes manual", function()
   eq(1, guard(source))
   local bufnr = vim.api.nvim_get_current_buf()
   vim.b.gutentags_root = root
-  vim.b.gutentags_files = { gtags_cscope = temp_root .. "/cache/GTAGS" }
-  local gutentags_writes = 0
-  local user_writes = 0
-  local gutentags_group = vim.api.nvim_create_augroup(
-    "gutentags_buffer_" .. bufnr, { clear = true }
-  )
-  vim.api.nvim_create_autocmd("BufWritePost", {
-    group = gutentags_group,
-    buffer = bufnr,
-    callback = function() gutentags_writes = gutentags_writes + 1 end,
-  })
-  local user_group = vim.api.nvim_create_augroup(
-    "gtags_adapter_user_" .. bufnr, { clear = true }
-  )
-  vim.api.nvim_create_autocmd("BufWritePost", {
-    group = user_group,
-    buffer = bufnr,
-    callback = function() user_writes = user_writes + 1 end,
-  })
+  local automatic_files = { gtags_cscope = temp_root .. "/cache/GTAGS" }
+  vim.b.gutentags_files = automatic_files
+  local writes = install_write_hooks(bufnr, "gtags_adapter_user_" .. bufnr)
 
   write(root .. "/GTAGS", { "manual database" })
-  eq(0, guard(source))
-  eq("manual", vim.b.gutentags_hybrid_mode)
-  eq(root .. "/GTAGS", vim.b.gutentags_files.gtags_cscope)
-  vim.api.nvim_exec_autocmds("BufWritePost", { buffer = bufnr })
+  local old_path = vim.env.PATH
+  local old_notify = vim.notify
+  local notifications = {}
+  local completion_result
+  local ok, err = xpcall(function()
+    vim.env.PATH = "/definitely-missing"
+    vim.notify = function(message)
+      notifications[#notifications + 1] = tostring(message)
+    end
+    vim.g.test_gutentags_jobs = { "gtags_cscope" }
 
-  eq(0, gutentags_writes)
-  eq(1, user_writes)
+    eq(false, adapter.update())
+    eq("automatic", vim.b.gutentags_hybrid_mode)
+    eq(root, vim.b.gutentags_root)
+    eq(automatic_files, vim.b.gutentags_files)
+    assert(notifications[#notifications]:find("稍后重试", 1, true))
+    vim.api.nvim_exec_autocmds("BufWritePost", { buffer = bufnr })
+    eq({ gutentags = 1, user = 1 }, writes)
+
+    vim.g.test_gutentags_jobs = {}
+    local completion_group = vim.api.nvim_create_augroup(
+      "gtags_adapter_completion_gap", { clear = true }
+    )
+    vim.api.nvim_create_autocmd("User", {
+      group = completion_group,
+      pattern = "GutentagsUpdated",
+      callback = function() completion_result = adapter.update() end,
+    })
+    vim.api.nvim_create_autocmd("User", {
+      group = completion_group,
+      pattern = "GutentagsUpdated",
+      callback = function()
+        vim.g.test_gutentags_jobs = { "gtags_cscope" }
+      end,
+    })
+    vim.api.nvim_exec_autocmds("User", { pattern = "GutentagsUpdated" })
+    eq(false, completion_result)
+    vim.wait(100)
+    eq("automatic", vim.b.gutentags_hybrid_mode)
+    eq(automatic_files, vim.b.gutentags_files)
+
+    vim.g.test_gutentags_jobs = {}
+    eq(false, adapter.update())
+    eq("automatic", vim.b.gutentags_hybrid_mode)
+    assert(vim.wait(1000, function()
+      return vim.b[bufnr].gutentags_hybrid_mode == "manual"
+    end, 10))
+    eq("manual", vim.b.gutentags_hybrid_mode)
+    eq(root .. "/GTAGS", vim.b.gutentags_files.gtags_cscope)
+    vim.api.nvim_exec_autocmds("BufWritePost", { buffer = bufnr })
+    eq({ gutentags = 1, user = 2 }, writes)
+  end, debug.traceback)
+  vim.g.test_gutentags_jobs = {}
+  vim.env.PATH = old_path
+  vim.notify = old_notify
+  pcall(vim.api.nvim_del_augroup_by_name, "gtags_adapter_completion_gap")
+  if not ok then error(err) end
+end)
+
+test("keeps hybrid ownership when a chained hook switches buffers", function()
+  local target_root = temp_root .. "/hook-switch-target"
+  local target_source = target_root .. "/target.c"
+  local other_root = temp_root .. "/hook-switch-other"
+  local other_source = other_root .. "/other.c"
+  vim.fn.mkdir(target_root .. "/.git", "p")
+  vim.fn.mkdir(other_root .. "/.git", "p")
+  write(target_source, { "int target_symbol;" })
+  write(other_source, { "int other_symbol;" })
+
+  edit(target_source)
+  eq(1, guard(target_source))
+  local target_buf = vim.api.nvim_get_current_buf()
+  local target_files = { gtags_cscope = temp_root .. "/target-cache/GTAGS" }
+  vim.b.gutentags_root = target_root
+  vim.b.gutentags_files = target_files
+  local target_writes = install_write_hooks(
+    target_buf, "gtags_adapter_target_user_" .. target_buf
+  )
+
+  edit(other_source)
+  eq(1, guard(other_source))
+  local other_buf = vim.api.nvim_get_current_buf()
+  local other_files = { gtags_cscope = temp_root .. "/other-cache/GTAGS" }
+  vim.b.gutentags_root = other_root
+  vim.b.gutentags_files = other_files
+  local other_writes = install_write_hooks(
+    other_buf, "gtags_adapter_other_user_" .. other_buf
+  )
+
+  write(target_root .. "/GTAGS", { "manual database" })
+  vim.api.nvim_set_current_buf(target_buf)
+  existing_hook_switch_to = other_buf
+  local ok, result = pcall(guard, target_source)
+  existing_hook_switch_to = nil
+  assert(ok, result)
+  eq(0, result)
+  eq("manual", vim.b[target_buf].gutentags_hybrid_mode)
+  eq(target_root, vim.b[target_buf].gutentags_root)
+  eq(target_root .. "/GTAGS",
+    vim.b[target_buf].gutentags_files.gtags_cscope)
+  eq("automatic", vim.b[other_buf].gutentags_hybrid_mode)
+  eq(other_root, vim.b[other_buf].gutentags_root)
+  eq(other_files, vim.b[other_buf].gutentags_files)
+
+  vim.api.nvim_exec_autocmds("BufWritePost", { buffer = target_buf })
+  vim.api.nvim_exec_autocmds("BufWritePost", { buffer = other_buf })
+  eq({ gutentags = 0, user = 1 }, target_writes)
+  eq({ gutentags = 1, user = 1 }, other_writes)
 end)
 
 test("chains an existing Gutentags init hook", function()
@@ -319,13 +435,6 @@ local function manual_query_fixture(name)
   assert(vim.fn.search("query_symbol") > 0)
   return root, source
 end
-
-write(temp_root .. "/autoload/gutentags.vim", {
-  "function! gutentags#inprogress() abort",
-  "  return get(g:, 'test_gutentags_jobs', [])",
-  "endfunction",
-})
-vim.opt.runtimepath:prepend(temp_root)
 
 test("reports an empty query without opening fzf", function()
   manual_query_fixture("empty")

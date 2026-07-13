@@ -7,12 +7,37 @@ end
 local temp_root = vim.fn.tempname()
 local auto_cache_dir
 local auto_buf
+local automatic_db
+local blocked_gtags_release
 local manual_root
+local original_gtags_executable
+local original_gtags_started_env
+local original_gtags_release_env
+local transition_manual_db
 vim.fn.mkdir(temp_root, "p")
 
 local function write(path, lines)
   vim.fn.mkdir(vim.fs.dirname(path), "p")
   assert(vim.fn.writefile(lines or {}, path) == 0)
+end
+
+local function release_blocked_gtags()
+  if blocked_gtags_release then
+    write(blocked_gtags_release, {})
+  end
+  if original_gtags_executable then
+    vim.g.gutentags_gtags_executable = original_gtags_executable
+  end
+  if original_gtags_started_env ~= nil then
+    vim.env.GTAGS_TEST_STARTED = original_gtags_started_env
+  else
+    vim.env.GTAGS_TEST_STARTED = nil
+  end
+  if original_gtags_release_env ~= nil then
+    vim.env.GTAGS_TEST_RELEASE = original_gtags_release_env
+  else
+    vim.env.GTAGS_TEST_RELEASE = nil
+  end
 end
 
 local function make_newer(path, database)
@@ -152,6 +177,7 @@ local function run()
   auto_buf = vim.api.nvim_get_current_buf()
   assert(edited, edit_error)
   local auto_db = assert(vim.b.gutentags_files.gtags_cscope)
+  automatic_db = auto_db
   auto_cache_dir = vim.fs.dirname(auto_db)
   assert(auto_db:find(vim.fn.stdpath("cache") .. "/gutentags", 1, true) == 1)
   assert(vim.wait(30000, function()
@@ -198,40 +224,124 @@ local function run()
   assert(require("gtags_adapter").find("g"))
   assert(vim.api.nvim_buf_get_name(0) == vim.fs.normalize(auto_source))
 
-  local live_manual_db = auto_root .. "/GTAGS"
-  local built = vim.system({ "gtags" }, { cwd = auto_root, text = true }):wait()
-  assert(built.code == 0, built.stderr)
+  local real_gtags = assert(vim.fn.exepath("gtags"))
+  local blocking_gtags = temp_root .. "/blocking-gtags"
+  local blocked_gtags_started = temp_root .. "/blocking-gtags-started"
+  blocked_gtags_release = temp_root .. "/blocking-gtags-release"
+  write(blocking_gtags, {
+    "#!/bin/sh",
+    "set -eu",
+    ": > \"${GTAGS_TEST_STARTED:?}\"",
+    "while [ ! -e \"${GTAGS_TEST_RELEASE:?}\" ]; do sleep 0.05; done",
+    "exec " .. vim.fn.shellescape(real_gtags) .. " \"$@\"",
+  })
+  assert(vim.uv.fs_chmod(blocking_gtags, 493))
+  original_gtags_executable = vim.g.gutentags_gtags_executable
+  original_gtags_started_env = vim.env.GTAGS_TEST_STARTED
+  original_gtags_release_env = vim.env.GTAGS_TEST_RELEASE
+  vim.env.GTAGS_TEST_STARTED = blocked_gtags_started
+  vim.env.GTAGS_TEST_RELEASE = blocked_gtags_release
+  vim.g.gutentags_gtags_executable = blocking_gtags
+
   vim.api.nvim_set_current_buf(auto_buf)
+  local starts_before_block = auto_update_starts
+  local automatic_root = vim.b.gutentags_root
+  local automatic_files = vim.deepcopy(vim.b.gutentags_files)
+  assert(require("gtags_adapter").update())
+  assert(vim.wait(10000, function()
+    local current = jobs(auto_buf)
+    return vim.fn.filereadable(blocked_gtags_started) == 1
+      and type(current) == "table"
+      and vim.tbl_contains(current, "gtags_cscope")
+  end, 50), "blocking automatic GTAGS update did not start")
+
+  vim.api.nvim_buf_set_lines(auto_buf, -1, -1, false, {
+    "int queued_save_marker(void) { return 6; }",
+  })
+  vim.cmd("silent write")
+
+  local live_manual_db = auto_root .. "/GTAGS"
+  transition_manual_db = live_manual_db
+  local built = vim.system({ real_gtags }, { cwd = auto_root, text = true }):wait()
+  assert(built.code == 0, built.stderr)
+  vim.api.nvim_buf_set_lines(auto_buf, -1, -1, false, {
+    "int queued_race_symbol(void) { return 7; }",
+  })
+  vim.cmd("silent write")
+  assert(auto_update_starts >= starts_before_block + 3,
+    "automatic update and queued saves did not invoke Gutentags")
   assert(vim.fn.search("auto_symbol", "cw") > 0,
     "automatic symbol is missing before live reclassification")
   cursor_on("auto_symbol")
-  assert(require("gtags_adapter").find("g"))
-  assert(vim.b.gutentags_hybrid_mode == "manual")
-  assert(vim.b.gutentags_files.gtags_cscope == live_manual_db)
-
-  local starts_before_save = auto_update_starts
-  local updates_before_save = auto_updates
-  vim.api.nvim_buf_set_lines(auto_buf, -1, -1, false, {
-    "int live_manual_saved_symbol(void) { return 6; }",
+  local transition_notifications = {}
+  local original_notify = vim.notify
+  vim.notify = function(message, level)
+    transition_notifications[#transition_notifications + 1] = {
+      message = tostring(message), level = level,
+    }
+  end
+  local transition_ok, transition_result = xpcall(function()
+    return require("gtags_adapter").find("g")
+  end, debug.traceback)
+  vim.notify = original_notify
+  assert(transition_ok, transition_result)
+  assert(not transition_result,
+    "active automatic work allowed a live manual transition")
+  assert(transition_notifications[#transition_notifications].message:find(
+    "稍后重试", 1, true), "transition failure did not request a retry")
+  vim.wait(100)
+  assert(vim.b.gutentags_hybrid_mode == "automatic")
+  assert(vim.b.gutentags_root == automatic_root)
+  assert(vim.deep_equal(vim.b.gutentags_files, automatic_files),
+    "deferred transition changed automatic database metadata")
+  local write_hooks = vim.api.nvim_get_autocmds({
+    group = "gutentags_buffer_" .. auto_buf,
+    event = "BufWritePost",
+    buffer = auto_buf,
   })
-  vim.cmd("silent write")
-  vim.wait(500)
-  local transitioned_jobs = jobs(auto_buf)
-  assert(type(transitioned_jobs) == "table" and #transitioned_jobs == 0,
-    "live manual buffer started a Gutentags job")
-  assert(auto_update_starts == starts_before_save,
-    "live manual buffer invoked the stale Gutentags save hook")
-  assert(auto_updates == updates_before_save,
-    "live manual buffer completed an automatic Gutentags update")
-  local stale_query = vim.system({ "global", "-x", "live_manual_saved_symbol" }, {
+  assert(#write_hooks == 1,
+    "deferred transition detached the automatic write hook")
+
+  local updates_before_release = auto_updates
+  vim.g.gutentags_gtags_executable = original_gtags_executable
+  write(blocked_gtags_release, {})
+  assert(vim.wait(30000, function()
+    local current = jobs(auto_buf)
+    return auto_updates >= updates_before_release + 2
+      and type(current) == "table" and #current == 0
+  end, 50), "blocked and queued automatic GTAGS updates did not drain")
+  release_blocked_gtags()
+  blocked_gtags_release = nil
+
+  assert(not require("gtags_adapter").find("g"),
+    "quiescent retry did not defer metadata mutation to the event loop")
+  assert(vim.b.gutentags_hybrid_mode == "automatic")
+  assert(vim.wait(1000, function()
+    return vim.b[auto_buf].gutentags_hybrid_mode == "manual"
+  end, 10), "scheduled live manual transition did not complete")
+  assert(vim.b.gutentags_files.gtags_cscope == live_manual_db)
+  cursor_on("auto_symbol")
+  assert(require("gtags_adapter").find("g"))
+
+  local stale_query = vim.system({ "global", "-x", "queued_race_symbol" }, {
     cwd = auto_root,
     env = { GTAGSROOT = auto_root, GTAGSDBPATH = auto_root },
     text = true,
   }):wait()
   assert(not (stale_query.stdout or ""):find(
-      "live_manual_saved_symbol", 1, true),
-    "automatic save hook updated the live manual database: "
+      "queued_race_symbol", 1, true),
+    "queued automatic replay updated the live manual database: "
       .. (stale_query.stdout or ""))
+  make_newer(auto_source, live_manual_db)
+  assert(require("gtags_adapter").update())
+  assert(vim.wait(10000, function()
+    local result = vim.system({ "global", "-x", "queued_race_symbol" }, {
+      cwd = auto_root,
+      env = { GTAGSROOT = auto_root, GTAGSDBPATH = auto_root },
+      text = true,
+    }):wait()
+    return (result.stdout or ""):find("queued_race_symbol", 1, true) ~= nil
+  end, 100), "explicit manual update did not index the queued-race symbol")
 
   manual_root = temp_root .. "/manual"
   local manual_source = manual_root .. "/manual.c"
@@ -319,18 +429,17 @@ local function run()
 end
 
 local function manual_update_running()
-  if manual_root == nil then
-    return false
-  end
   local state = _G.NvimGutentagsHybridState
   assert(type(state) == "table", "adapter state is unavailable during cleanup")
   local updates = state.manual_updates
   assert(type(updates) == "table", "manual update state is unavailable during cleanup")
-  return updates[manual_root] ~= nil
+  return next(updates) ~= nil
 end
 
 local function cleanup()
+  release_blocked_gtags()
   local last_jobs, last_job_error = {}, nil
+  local last_path_jobs = {}
   local last_manual_update = false
   local quiescent = vim.wait(30000, function()
     if auto_buf then
@@ -341,14 +450,29 @@ local function cleanup()
     if last_job_error then
       error("automatic job inspection failed: " .. last_job_error)
     end
+    last_path_jobs = {}
+    for _, database in ipairs({ automatic_db, transition_manual_db }) do
+      if database then
+        local ok, index = pcall(vim.fn["gutentags#find_job_index_by_tags_file"],
+          "gtags_cscope", database)
+        if not ok then
+          error("Gutentags path job inspection failed: " .. tostring(index))
+        end
+        if index >= 0 then
+          last_path_jobs[#last_path_jobs + 1] = database
+        end
+      end
+    end
     last_manual_update = manual_update_running()
     return type(last_jobs) == "table" and #last_jobs == 0
+      and #last_path_jobs == 0
       and not last_manual_update
   end, 100)
   if not quiescent then
     error("writers did not quiesce; temporary project and cache fixtures were preserved: "
       .. vim.inspect({ automatic_jobs = last_jobs,
         automatic_job_error = last_job_error,
+        path_jobs = last_path_jobs,
         manual_update = last_manual_update }))
   end
 
