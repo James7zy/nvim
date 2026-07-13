@@ -79,7 +79,7 @@ UBUNTU_CODENAME=jammy
 │       ├── telescope.lua   # 模糊查找（find_files 自适应用 fd/fdfind）
 │       ├── nvim-tree.lua   # 文件树
 │       ├── aerial.lua      # 代码大纲（符号大纲，已取代 tagbar）
-│       ├── gtags.lua       # cscope/gtags 符号跳转（cscope_maps.nvim）
+│       ├── gtags.lua       # Gutentags 自动/手动混合索引（结果走 fzf-lua）
 │       ├── trouble.lua     # 诊断/引用列表
 │       ├── bufferline.lua  # 顶部 buffer 标签栏
 │       ├── easymotion.lua  # 快速移动
@@ -186,21 +186,45 @@ return {
 
 > 📌 **极简原则**：本配置刻意避免功能重复的插件。符号大纲统一用 aerial，跳转/移动统一用 easymotion，诊断列表用 trouble，各司其职、不堆叠。
 
-### 大型代码库符号跳转（gtags / cscope）
+### 大型代码库符号跳转（Gutentags / GNU GLOBAL）
 
-对于内核、大型 C/C++ 工程，仅靠 LSP 索引可能力不从心。这里用 GNU GLOBAL（gtags）建立全局索引，并通过 [cscope_maps.nvim](https://github.com/dhananjaylatkar/cscope_maps.nvim) 的 cscope 接口做符号跳转，跳转结果走 telescope 展示。配置在 `lua/plugins/gtags.lua`
+本配置用三层协作完成跨文件符号查询：
 
-前置依赖与建索引：
+- `vim-gutentags` 在后台生成并增量更新 GNU GLOBAL 数据库。
+- `gutentags_plus` 为当前 buffer 选择正确数据库并执行 `gtags-cscope` 查询。
+- `fzf-lua` 展示多条结果；单条结果直接跳转。
 
-```bash
-sudo apt install global            # 提供 gtags / global / gtags-cscope
+系统需要 `gtags`、`global`、`gtags-cscope`。配置使用 `native-pygments`，因此索引非 GNU GLOBAL 原生语言时还需要 Python 与 Pygments。由于 Neovim 0.9 已移除原生 cscope，这里使用带兼容补丁的 `skywind3000/vim-gutentags`，不再加载 `cscope_maps.nvim`。
 
-# 在工程根目录建索引（建好后会生成 GTAGS / GRTAGS / GPATH 三个文件）
-gtags                              # 普通工程
-make gtags                         # Linux 内核源码（自带 target）
-```
+索引模式按当前文件向上逐级判断，遇到第一个项目边界即停止：
 
-> 💡 这里**刻意不用** `vim-gutentags` 自动维护索引：它的 cscope_maps 桥接会把 db 路径劫持到 `~/.cache/gutentags` 下，对超大代码库（如内核）容易建索引失败而导致查询永远为空。改为手动在源码树里建 `GTAGS`，索引改动后按 `<leader>gb` 手动重建。
+1. 同一层有 `GTAGS`：手动模式，直接复用项目内数据库。
+2. 同一层有 `.notags`：禁止自动索引，适合尚未手动建库的大仓库。
+3. 同一层有 `.git`、`.root`、`.project` 等：自动模式，数据库保存到 `stdpath("cache")/gutentags`。
+
+非版本库项目可在根目录创建空的 `.root`。新的大型仓库应先创建 `.notags`，再在根目录运行合适的建库命令：普通项目运行 `gtags`，Linux 内核运行 `make gtags`。已有项目内 `GTAGS` 时不需要保留 `.notags`。
+
+查询键：
+
+| 键位 | 功能 |
+|---|---|
+| `<leader>gd` | 定义 |
+| `<leader>gs` | 符号/引用 |
+| `<leader>gr` | 调用当前函数的位置 |
+| `<leader>gt` | 文本 |
+| `<leader>ge` | egrep |
+| `<leader>gf` | 文件 |
+| `<leader>gi` | include 当前文件的位置 |
+| `<leader>gb` | 更新当前项目索引 |
+
+首次自动建库或索引更新期间，查询会提示等待，避免读取尚未完成的数据库。自动模式的 `<leader>gb` 调用 `GutentagsUpdate`；手动模式异步运行 `global -u`。
+
+排错：
+
+- `:GutentagsToggleTrace` 开启日志，保存文件或执行 `:GutentagsUpdate` 后用 `:messages` 查看。
+- 提示找不到项目根时，在正确目录创建 `.root`。
+- 自动缓存损坏时，退出正在使用该项目的 Neovim，删除提示路径所在的缓存子目录，再重新打开文件建库。
+- 手动数据库损坏时，不要让配置自动删除源码树文件；在项目根按项目要求重新运行 `gtags` 或 `make gtags`。
 
 ### 自动补全插件
 
@@ -377,4 +401,3 @@ sudo apt-get install -y fd-find       # 二进制为 /usr/bin/fdfind
 
 - [use_vim_as_ide](https://github.com/yangyangwithgnu/use_vim_as_ide)
 - [从零开始配置 Neovim(Nvim)](https://martinlwx.github.io/zh-cn/config-neovim-from-scratch/#%E4%B8%BA%E4%BB%80%E4%B9%88%E9%80%89%E6%8B%A9-neovim)
-
