@@ -311,7 +311,12 @@ test("opens fzf-lua for multiple valid locations", function()
 
   eq(true, adapter.find("s"))
   eq(before_fzf + 1, fzf_calls)
-  eq(2, #vim.fn.getqflist())
+  local retained = vim.fn.getqflist()
+  eq(2, #retained)
+  for _, item in ipairs(retained) do
+    assert(item.valid == 1 and item.bufnr > 0 and item.lnum > 0,
+      "quickfix retained a non-location item")
+  end
 end)
 
 test("surfaces a line-zero database error instead of opening fzf", function()
@@ -320,8 +325,10 @@ test("surfaces a line-zero database error instead of opening fzf", function()
     { text = '[cscope g: definition of "query_symbol"]' },
     { text = "GTAGS corrupted", lnum = 0 },
   }
+  local before_fzf = fzf_calls
 
   eq(false, adapter.find("g"))
+  eq(before_fzf, fzf_calls)
   assert(notifications[#notifications].message:find("GTAGS corrupted", 1, true))
 end)
 
