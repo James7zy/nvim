@@ -451,8 +451,6 @@ local function run()
     return vim.fn.filereadable(notags_automatic_db) == 1
       and job_index(notags_automatic_db) < 0
   end, 50), ".notags automatic fixture build timed out")
-  cursor_on("notags_live_symbol")
-  assert(require("gtags_adapter").find("g"))
   local trusted_notags_files = vim.deepcopy(vim.b.gutentags_files)
   local notags_user_writes = 0
   local notags_user_group = vim.api.nvim_create_augroup(

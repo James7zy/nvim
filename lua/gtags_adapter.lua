@@ -11,6 +11,19 @@ _G.NvimGutentagsHybridState = state
 state.manual_updates = state.manual_updates or {}
 local manual_updates = state.manual_updates
 local legacy_automatic_metadata = state.automatic_metadata
+local automatic_transition_state_invalid =
+  state.automatic_transitions_invalid ~= nil
+if state.automatic_transitions ~= nil
+    and type(state.automatic_transitions) ~= "table" then
+  automatic_transition_state_invalid = true
+end
+if legacy_automatic_metadata ~= nil
+    and type(legacy_automatic_metadata) ~= "table" then
+  automatic_transition_state_invalid = true
+end
+if automatic_transition_state_invalid then
+  state.automatic_transitions_invalid = true
+end
 if type(state.automatic_transitions) ~= "table" then
   state.automatic_transitions = {}
 end
@@ -167,16 +180,18 @@ end
 migrate_legacy_automatic_metadata()
 
 local function automatic_record_matches(record, bufnr, path, hybrid_root)
-  return valid_automatic_record(record)
+  return not automatic_transition_state_invalid
+    and valid_automatic_record(record)
     and vim.api.nvim_buf_is_valid(bufnr)
     and vim.api.nvim_buf_get_name(bufnr) == path
     and record.path == path
     and record.hybrid_root == hybrid_root
 end
 
-local function observe_automatic_metadata(bufnr, metadata)
+local function observe_automatic_metadata(bufnr, metadata, allow_create)
   metadata = metadata or automatic_metadata(bufnr)
-  if not vim.api.nvim_buf_is_valid(bufnr)
+  if automatic_transition_state_invalid
+      or not vim.api.nvim_buf_is_valid(bufnr)
       or not valid_automatic_snapshot(metadata) then
     return nil
   end
@@ -189,6 +204,9 @@ local function observe_automatic_metadata(bufnr, metadata)
   end
   local record = automatic_transition_state[bufnr]
   if record == nil then
+    if not allow_create then
+      return nil
+    end
     record = {
       path = path,
       hybrid_root = hybrid_root,
@@ -201,16 +219,64 @@ local function observe_automatic_metadata(bufnr, metadata)
   if not valid_automatic_record(record) then
     return nil
   end
-  record.targets[metadata.target] = true
   if record.path ~= path or record.hybrid_root ~= hybrid_root then
-    return record
+    return nil
   end
+  record.targets[metadata.target] = true
   if automatic_snapshots_equal(record.trusted, metadata) then
     record.candidate = nil
   else
     record.candidate = copy_automatic_snapshot(metadata)
   end
   return record
+end
+
+local function stable_automatic_identity(bufnr, path, context)
+  if automatic_transition_state_invalid
+      or not vim.api.nvim_buf_is_valid(bufnr)
+      or vim.api.nvim_buf_get_name(bufnr) ~= path
+      or type(context) ~= "table" or context.mode ~= "automatic" then
+    return false
+  end
+  local buffer = vim.b[bufnr]
+  return buffer.gutentags_hybrid_mode == "automatic"
+    and buffer.gutentags_hybrid_root == context.root
+    and vim.deep_equal(classify(path), context)
+end
+
+local function observe_stable_automatic_metadata(bufnr, path, context)
+  if not stable_automatic_identity(bufnr, path, context) then
+    return nil
+  end
+  local metadata = automatic_metadata(bufnr)
+  if not metadata or metadata.root ~= context.root then
+    return nil
+  end
+  return observe_automatic_metadata(bufnr, metadata, true)
+end
+
+local function block_initial_automatic_trust(bufnr)
+  if automatic_transition_state[bufnr] == nil then
+    automatic_transition_state[bufnr] = { invalid_setup = true }
+  end
+end
+
+local function schedule_automatic_metadata_observer(bufnr, path, context)
+  context = vim.deepcopy(context)
+  vim.schedule(function()
+    if automatic_transition_state_invalid
+        or not vim.api.nvim_buf_is_valid(bufnr) then
+      return
+    end
+    local buffer = vim.b[bufnr]
+    if not stable_automatic_identity(bufnr, path, context) then
+      if buffer.gutentags_hybrid_mode == "automatic" then
+        block_initial_automatic_trust(bufnr)
+      end
+      return
+    end
+    observe_stable_automatic_metadata(bufnr, path, context)
+  end)
 end
 
 local function automatic_targets_quiescent(record)
@@ -312,9 +378,7 @@ local function apply_context(bufnr, context, hook_changes, coordinated)
   buffer.gutentags_hybrid_mode = context.mode
   buffer.gutentags_hybrid_root = context.root
   if context.mode ~= "manual" then
-    if context.mode == "automatic" then
-      observe_automatic_metadata(bufnr)
-    else
+    if context.mode ~= "automatic" then
       automatic_transition_state[bufnr] = nil
     end
     return true
@@ -344,6 +408,9 @@ local function hybrid_guard(bufnr, path, hook_changes)
   if not applied then
     return 1
   end
+  if context.mode == "automatic" then
+    schedule_automatic_metadata_observer(bufnr, path, context)
+  end
   return (context.mode == "manual" or context.mode == "disabled") and 0 or 1
 end
 
@@ -357,7 +424,7 @@ schedule_context_transition = function(bufnr, path, context)
   end
   local buffer = vim.b[bufnr]
   local metadata = automatic_metadata(bufnr)
-  local record = metadata and observe_automatic_metadata(bufnr, metadata)
+  local record = metadata and observe_automatic_metadata(bufnr, metadata, false)
     or automatic_transition_state[bufnr]
   local record_matches = automatic_record_matches(
     record, bufnr, path, buffer.gutentags_hybrid_root)
@@ -392,7 +459,7 @@ schedule_context_transition = function(bufnr, path, context)
     end
     local current_metadata = automatic_metadata(bufnr)
     local current_record = current_metadata
-        and observe_automatic_metadata(bufnr, current_metadata)
+        and observe_automatic_metadata(bufnr, current_metadata, false)
       or automatic_transition_state[bufnr]
     if not automatic_record_matches(
         current_record, bufnr, path, current.gutentags_hybrid_root) then
@@ -455,12 +522,13 @@ local function current_context()
   if not applied then
     return nil, apply_error
   end
-  context.bufnr = bufnr
   if context.mode == "automatic" then
+    observe_stable_automatic_metadata(bufnr, path, context)
     local files = vim.b[bufnr].gutentags_files
     context.root = vim.b[bufnr].gutentags_root or context.root
     context.database = type(files) == "table" and files.gtags_cscope or nil
   end
+  context.bufnr = bufnr
   if context.mode == "disabled" then
     return context, context.root .. " 包含 .notags；请先手动生成 GTAGS"
   end

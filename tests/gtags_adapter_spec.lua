@@ -60,6 +60,15 @@ local function guard(path)
   return vim.fn.call(vim.g.gutentags_init_user_func, { path })
 end
 
+local function wait_for_trusted_target(bufnr, target)
+  assert(vim.wait(1000, function()
+    local record = _G.NvimGutentagsHybridState.automatic_transitions[bufnr]
+    return type(record) == "table"
+      and type(record.trusted) == "table"
+      and record.trusted.target == target
+  end, 10), "automatic metadata was not observed after setup")
+end
+
 write(temp_root .. "/autoload/gutentags.vim", {
   "function! gutentags#inprogress() abort",
   "  return get(g:, 'test_gutentags_jobs', [])",
@@ -182,6 +191,92 @@ test("clears a stale manual database when the project mode changes", function()
   eq(nil, vim.b.gutentags_files)
 end)
 
+test("does not create first trust during a nonautomatic transition", function()
+  local root = temp_root .. "/untrusted-transition"
+  local source = root .. "/transition.c"
+  local target = temp_root .. "/untrusted-cache/GTAGS"
+  vim.fn.mkdir(root .. "/.git", "p")
+  write(source, { "int untrusted_transition_symbol;" })
+  edit(source)
+
+  local bufnr = vim.api.nvim_get_current_buf()
+  vim.b.gutentags_hybrid_mode = "automatic"
+  vim.b.gutentags_hybrid_root = root
+  vim.b.gutentags_root = root
+  vim.b.gutentags_files = { gtags_cscope = target }
+  _G.NvimGutentagsHybridState.automatic_transitions[bufnr] = nil
+  write(root .. "/GTAGS", { "manual database" })
+
+  local old_path = vim.env.PATH
+  local ok, err = xpcall(function()
+    vim.env.PATH = "/definitely-missing"
+    eq(false, adapter.update())
+    vim.wait(100)
+    eq("automatic", vim.b.gutentags_hybrid_mode)
+    eq(nil, _G.NvimGutentagsHybridState.automatic_transitions[bufnr])
+  end, debug.traceback)
+  vim.env.PATH = old_path
+  if not ok then error(err) end
+end)
+
+test("observes first trust after stable automatic setup", function()
+  local root = temp_root .. "/stable-automatic-observer"
+  local source = root .. "/stable.c"
+  local target = temp_root .. "/stable-observer-cache/GTAGS"
+  vim.fn.mkdir(root .. "/.git", "p")
+  write(source, { "int stable_observer_symbol;" })
+  edit(source)
+
+  eq(1, guard(source))
+  local bufnr = vim.api.nvim_get_current_buf()
+  vim.b.gutentags_root = root
+  vim.b.gutentags_files = { gtags_cscope = target }
+  eq(nil, _G.NvimGutentagsHybridState.automatic_transitions[bufnr])
+  assert(vim.wait(1000, function()
+    local record = _G.NvimGutentagsHybridState.automatic_transitions[bufnr]
+    return type(record) == "table"
+      and type(record.trusted) == "table"
+      and record.trusted.target == target
+  end, 10), "stable automatic setup did not establish trust")
+end)
+
+test("blocks trust when the boundary changes before observation", function()
+  local root = temp_root .. "/changed-observer-boundary"
+  local source = root .. "/changed.c"
+  local target = temp_root .. "/changed-observer-cache/GTAGS"
+  vim.fn.mkdir(root .. "/.git", "p")
+  write(source, { "int changed_observer_symbol;" })
+  edit(source)
+
+  eq(1, guard(source))
+  local bufnr = vim.api.nvim_get_current_buf()
+  vim.b.gutentags_root = root
+  vim.b.gutentags_files = { gtags_cscope = target }
+  write(root .. "/GTAGS", { "manual database" })
+  vim.wait(100)
+  local record = _G.NvimGutentagsHybridState.automatic_transitions[bufnr]
+  eq(true, type(record) == "table" and record.invalid_setup == true)
+  eq(nil, record.trusted)
+
+  assert(vim.fn.delete(root .. "/GTAGS") == 0)
+  eq(1, guard(source))
+  vim.wait(100)
+  record = _G.NvimGutentagsHybridState.automatic_transitions[bufnr]
+  eq(true, type(record) == "table" and record.invalid_setup == true)
+  eq(nil, record.trusted)
+
+  write(root .. "/GTAGS", { "manual database" })
+  local old_path = vim.env.PATH
+  local ok, err = xpcall(function()
+    vim.env.PATH = "/definitely-missing"
+    eq(false, adapter.update())
+    vim.wait(100)
+    eq("automatic", vim.b.gutentags_hybrid_mode)
+  end, debug.traceback)
+  vim.env.PATH = old_path
+  if not ok then error(err) end
+end)
+
 test("defers a live manual transition until Gutentags work is quiescent", function()
   local root = temp_root .. "/live-manual-transition"
   local source = root .. "/transition.c"
@@ -194,6 +289,7 @@ test("defers a live manual transition until Gutentags work is quiescent", functi
   vim.b.gutentags_root = root
   local automatic_files = { gtags_cscope = temp_root .. "/cache/GTAGS" }
   vim.b.gutentags_files = automatic_files
+  wait_for_trusted_target(bufnr, automatic_files.gtags_cscope)
   local writes = install_write_hooks(bufnr, "gtags_adapter_user_" .. bufnr)
 
   write(root .. "/GTAGS", { "manual database" })
@@ -271,6 +367,7 @@ test("defers rescan until automatic metadata is restored and quiescent", functio
   vim.b.gutentags_root = root
   vim.b.gutentags_files = automatic_files
   eq(1, guard(source))
+  wait_for_trusted_target(bufnr, automatic_files.gtags_cscope)
   local writes = install_write_hooks(
     bufnr, "gtags_adapter_rescan_user_" .. bufnr
   )
@@ -330,6 +427,7 @@ test("retains every migrated automatic target until exact adoption", function()
   vim.b.gutentags_root = root
   vim.b.gutentags_files = { gtags_cscope = c1 }
   eq(1, guard(source))
+  wait_for_trusted_target(bufnr, c1)
   local writes = install_write_hooks(
     bufnr, "gtags_adapter_migration_user_" .. bufnr
   )
@@ -390,6 +488,7 @@ test("restores trusted automatic metadata during a notags rescan", function()
   vim.b.gutentags_root = root
   vim.b.gutentags_files = cache_files
   eq(1, guard(source))
+  wait_for_trusted_target(bufnr, cache_files.gtags_cscope)
   local writes = install_write_hooks(
     bufnr, "gtags_adapter_notags_user_" .. bufnr
   )
@@ -433,6 +532,7 @@ test("keeps hybrid ownership when a chained hook switches buffers", function()
   local target_files = { gtags_cscope = temp_root .. "/target-cache/GTAGS" }
   vim.b.gutentags_root = target_root
   vim.b.gutentags_files = target_files
+  wait_for_trusted_target(target_buf, target_files.gtags_cscope)
   local target_writes = install_write_hooks(
     target_buf, "gtags_adapter_target_user_" .. target_buf
   )
@@ -833,6 +933,7 @@ test("cleans automatic transition state on wipeout after reload", function()
     gtags_cscope = temp_root .. "/wipeout-cache/GTAGS",
   }
   eq(1, guard(source))
+  wait_for_trusted_target(bufnr, vim.b.gutentags_files.gtags_cscope)
   local shared_state = _G.NvimGutentagsHybridState
   assert(type(shared_state.automatic_transitions) == "table")
   assert(type(shared_state.automatic_transitions[bufnr]) == "table")
@@ -1166,6 +1267,64 @@ test("installs the leader-g update map", function()
     eq(1, calls)
   end, debug.traceback)
   current_adapter.update = original_update
+  if not ok then error(err) end
+end)
+
+test("keeps malformed transition roots blocked across reloads", function()
+  local saved_state = _G.NvimGutentagsHybridState
+  local old_path = vim.env.PATH
+
+  local function assert_reload_blocked(seed, name)
+    _G.NvimGutentagsHybridState = seed
+    package.loaded.gtags_adapter = nil
+    local isolated_adapter = require("gtags_adapter")
+    isolated_adapter.setup()
+
+    local root = temp_root .. "/malformed-" .. name
+    local source = root .. "/malformed.c"
+    local target = temp_root .. "/malformed-cache-" .. name .. "/GTAGS"
+    vim.fn.mkdir(root .. "/.git", "p")
+    write(root .. "/GTAGS", { "manual database" })
+    write(source, { "int malformed_state_symbol;" })
+    edit(source)
+    vim.b.gutentags_hybrid_mode = "automatic"
+    vim.b.gutentags_hybrid_root = root
+    vim.b.gutentags_root = root
+    vim.b.gutentags_files = { gtags_cscope = target }
+
+    eq(false, isolated_adapter.update())
+    vim.wait(100)
+    eq("automatic", vim.b.gutentags_hybrid_mode)
+    eq(true, _G.NvimGutentagsHybridState.automatic_transitions_invalid)
+
+    package.loaded.gtags_adapter = nil
+    local reloaded_adapter = require("gtags_adapter")
+    reloaded_adapter.setup()
+    eq(true, _G.NvimGutentagsHybridState.automatic_transitions_invalid)
+    eq(false, reloaded_adapter.update())
+    vim.wait(100)
+    eq("automatic", vim.b.gutentags_hybrid_mode)
+  end
+
+  local ok, err = xpcall(function()
+    vim.env.PATH = "/definitely-missing"
+    assert_reload_blocked({
+      automatic_transitions = "malformed",
+      manual_updates = {},
+    }, "current")
+    assert_reload_blocked({
+      automatic_metadata = "malformed",
+      automatic_transitions = {},
+      manual_updates = {},
+    }, "legacy")
+  end, debug.traceback)
+
+  vim.env.PATH = old_path
+  _G.NvimGutentagsHybridState = saved_state
+  package.loaded.gtags_adapter = nil
+  adapter = require("gtags_adapter")
+  adapter.setup()
+  eq(nil, saved_state.automatic_transitions_invalid)
   if not ok then error(err) end
 end)
 
