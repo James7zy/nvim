@@ -529,14 +529,42 @@ test("dispatches automatic updates to the buffer-local Gutentags command", funct
   vim.fn.mkdir(root .. "/.git", "p")
   write(source, { "int auto_update_symbol;" })
   edit(source)
+  vim.b.gutentags_root = root
+  vim.b.gutentags_files = { gtags_cscope = temp_root .. "/cache/GTAGS" }
   local calls = 0
   pcall(vim.api.nvim_del_user_command, "GutentagsUpdate")
   vim.api.nvim_create_user_command("GutentagsUpdate", function()
     calls = calls + 1
   end, {})
 
-  eq(true, adapter.update())
-  eq(1, calls)
+  local ok, err = xpcall(function()
+    eq(true, adapter.update())
+    eq(1, calls)
+  end, debug.traceback)
+  pcall(vim.api.nvim_del_user_command, "GutentagsUpdate")
+  if not ok then error(err) end
+end)
+
+test("dispatches automatic updates before database metadata exists", function()
+  local root = temp_root .. "/update-auto-unprepared"
+  local source = root .. "/auto.c"
+  vim.fn.mkdir(root .. "/.git", "p")
+  write(source, { "int auto_update_unprepared_symbol;" })
+  edit(source)
+  local calls = 0
+  pcall(vim.api.nvim_del_user_command, "GutentagsUpdate")
+  vim.api.nvim_create_user_command("GutentagsUpdate", function()
+    calls = calls + 1
+  end, {})
+
+  local ok, err = xpcall(function()
+    eq(nil, vim.b.gutentags_root)
+    eq(nil, vim.b.gutentags_files)
+    eq(true, adapter.update())
+    eq(1, calls)
+  end, debug.traceback)
+  pcall(vim.api.nvim_del_user_command, "GutentagsUpdate")
+  if not ok then error(err) end
 end)
 
 test("reports a throwing automatic update command", function()
