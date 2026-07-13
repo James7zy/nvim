@@ -233,6 +233,152 @@ test("chains an existing Gutentags init hook", function()
   existing_hook_update = nil
 end)
 
+local notifications = {}
+vim.notify = function(message, level)
+  notifications[#notifications + 1] = { message = tostring(message), level = level }
+end
+
+local query_items = {}
+local last_query
+vim.api.nvim_create_user_command("GscopeFind", function(opts)
+  last_query = { args = opts.fargs, bang = opts.bang }
+  vim.fn.setqflist({}, "r", { title = "test GscopeFind", items = query_items })
+end, { nargs = "+", bang = true })
+
+local fzf_calls = 0
+package.loaded["fzf-lua"] = {
+  quickfix = function(opts)
+    fzf_calls = fzf_calls + 1
+    eq(true, opts.valid_only)
+  end,
+}
+
+local function manual_query_fixture(name)
+  local root = temp_root .. "/query-" .. name
+  local source = root .. "/source.c"
+  write(root .. "/GTAGS", { "test database" })
+  write(source, { "int query_symbol(void) { return 1; }" })
+  edit(source)
+  assert(vim.fn.search("query_symbol") > 0)
+  return root, source
+end
+
+write(temp_root .. "/autoload/gutentags.vim", {
+  "function! gutentags#inprogress() abort",
+  "  return get(g:, 'test_gutentags_jobs', [])",
+  "endfunction",
+})
+vim.opt.runtimepath:prepend(temp_root)
+
+test("reports an empty query without opening fzf", function()
+  manual_query_fixture("empty")
+  query_items = { { text = '[cscope g: definition of "query_symbol"]' } }
+  local before_fzf = fzf_calls
+
+  eq(false, adapter.find("g"))
+  eq(before_fzf, fzf_calls)
+  assert(notifications[#notifications].message:find("未找到", 1, true))
+end)
+
+test("jumps directly when a query has one valid location", function()
+  local root = manual_query_fixture("single")
+  local target = root .. "/target.c"
+  write(target, { "", "int query_symbol(void) { return 2; }" })
+  query_items = {
+    { text = '[cscope g: definition of "query_symbol"]' },
+    { filename = target, lnum = 2, col = 1, text = "query_symbol" },
+  }
+
+  eq(true, adapter.find("g"))
+  eq({ "g", "query_symbol" }, last_query.args)
+  eq(true, last_query.bang)
+  eq(vim.fs.normalize(target), vim.api.nvim_buf_get_name(0))
+  eq(2, vim.api.nvim_win_get_cursor(0)[1])
+end)
+
+test("opens fzf-lua for multiple valid locations", function()
+  local root = manual_query_fixture("multiple")
+  local first = root .. "/first.c"
+  local second = root .. "/second.c"
+  write(first, { "int query_symbol;" })
+  write(second, { "int query_symbol;" })
+  query_items = {
+    { text = '[cscope s: symbol "query_symbol"]' },
+    { filename = first, lnum = 1, col = 1, text = "first" },
+    { filename = second, lnum = 1, col = 1, text = "second" },
+  }
+  local before_fzf = fzf_calls
+
+  eq(true, adapter.find("s"))
+  eq(before_fzf + 1, fzf_calls)
+  eq(2, #vim.fn.getqflist())
+end)
+
+test("surfaces a line-zero database error instead of opening fzf", function()
+  manual_query_fixture("corrupt")
+  query_items = {
+    { text = '[cscope g: definition of "query_symbol"]' },
+    { text = "GTAGS corrupted", lnum = 0 },
+  }
+
+  eq(false, adapter.find("g"))
+  assert(notifications[#notifications].message:find("GTAGS corrupted", 1, true))
+end)
+
+test("blocks automatic queries while Gutentags is running", function()
+  local root = temp_root .. "/query-busy"
+  local source = root .. "/source.c"
+  local database = temp_root .. "/query-busy-cache/GTAGS"
+  vim.fn.mkdir(root .. "/.git", "p")
+  write(source, { "int query_symbol(void) { return 1; }" })
+  write(database, { "test database" })
+  edit(source)
+  vim.b.gutentags_root = root
+  vim.b.gutentags_files = { gtags_cscope = database }
+  vim.g.test_gutentags_jobs = { "gtags_cscope" }
+
+  eq(false, adapter.find("g"))
+  assert(notifications[#notifications].message:find("正在生成或更新", 1, true))
+  vim.g.test_gutentags_jobs = {}
+end)
+
+test("reports tools missing from the query action", function()
+  manual_query_fixture("missing-tools")
+  local old_path = vim.env.PATH
+  local ok, err = xpcall(function()
+    vim.env.PATH = "/definitely-missing"
+    eq(false, adapter.find("g"))
+    assert(notifications[#notifications].message:find("global", 1, true))
+    assert(notifications[#notifications].message:find("gtags-cscope", 1, true))
+  end, debug.traceback)
+  vim.env.PATH = old_path
+  if not ok then error(err) end
+end)
+
+test("installs the existing leader-g query maps", function()
+  for _, suffix in ipairs({ "d", "s", "r", "t", "e", "f", "i" }) do
+    local mapping = vim.fn.maparg("<leader>g" .. suffix, "n", false, true)
+    assert(type(mapping) == "table" and mapping.desc,
+      "missing map <leader>g" .. suffix)
+  end
+end)
+
+test("query maps dispatch through the reloaded adapter", function()
+  local reloaded_adapter = require("gtags_adapter")
+  local original_find = reloaded_adapter.find
+  local dispatched_kind
+  local ok, err = xpcall(function()
+    reloaded_adapter.find = function(kind)
+      dispatched_kind = kind
+    end
+    local mapping = vim.fn.maparg("<leader>gd", "n", false, true)
+    mapping.callback()
+    eq("g", dispatched_kind)
+  end, debug.traceback)
+  reloaded_adapter.find = original_find
+  if not ok then error(err) end
+end)
+
 local function run()
   for _, item in ipairs(tests) do
     local ok, err = xpcall(item.fn, debug.traceback)
