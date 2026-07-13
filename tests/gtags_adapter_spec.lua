@@ -471,6 +471,21 @@ test("blocks automatic queries while Gutentags is running", function()
   vim.g.test_gutentags_jobs = {}
 end)
 
+test("rejects automatic queries until Gutentags prepares a database", function()
+  local root = temp_root .. "/query-automatic-unprepared"
+  local source = root .. "/source.c"
+  vim.fn.mkdir(root .. "/.git", "p")
+  write(source, { "int query_symbol(void) { return 1; }" })
+  edit(source)
+  local before_calls = query_calls
+
+  eq(false, adapter.find("g"))
+  eq(before_calls, query_calls)
+  local notification = notifications[#notifications]
+  eq(vim.log.levels.WARN, notification.level)
+  eq("Gutentags 尚未为当前项目准备数据库", notification.message)
+end)
+
 test("reports tools missing from the query action", function()
   manual_query_fixture("missing-tools")
   local old_path = vim.env.PATH
@@ -514,8 +529,6 @@ test("dispatches automatic updates to the buffer-local Gutentags command", funct
   vim.fn.mkdir(root .. "/.git", "p")
   write(source, { "int auto_update_symbol;" })
   edit(source)
-  vim.b.gutentags_root = root
-  vim.b.gutentags_files = { gtags_cscope = temp_root .. "/cache/GTAGS" }
   local calls = 0
   pcall(vim.api.nvim_del_user_command, "GutentagsUpdate")
   vim.api.nvim_create_user_command("GutentagsUpdate", function()
@@ -633,6 +646,34 @@ test("reports a failed manual global update", function()
   if not ok then error(err) end
 end)
 
+test("reports a signal-terminated manual update as a failure", function()
+  local root, source = manual_query_fixture("update-signal-failure")
+  edit(source)
+  local old_system = vim.system
+  local callback
+  vim.system = function(_, _, cb)
+    callback = cb
+    return { pid = 6789 }
+  end
+
+  local ok, err = xpcall(function()
+    eq(true, adapter.update())
+    local before_notifications = #notifications
+    callback({ code = 0, signal = 15, stdout = "", stderr = "" })
+    assert(vim.wait(1000, function()
+      return #notifications == before_notifications + 1
+    end))
+    local notification = notifications[#notifications]
+    eq(vim.log.levels.ERROR, notification.level)
+    assert(notification.message:find("signal 15", 1, true))
+    eq(nil, notification.message:find("更新完成", 1, true))
+    eq(nil, _G.NvimGutentagsHybridState.manual_updates[root])
+  end, debug.traceback)
+  vim.system = old_system
+  _G.NvimGutentagsHybridState.manual_updates[root] = nil
+  if not ok then error(err) end
+end)
+
 test("releases the manual update lock when global fails to start", function()
   local root, source = manual_query_fixture("update-launch-failure")
   edit(source)
@@ -676,8 +717,6 @@ test("checks gtags only for automatic updates", function()
   vim.fn.mkdir(root .. "/.git", "p")
   write(source, { "int auto_update_symbol;" })
   edit(source)
-  vim.b.gutentags_root = root
-  vim.b.gutentags_files = { gtags_cscope = temp_root .. "/missing-cache/GTAGS" }
   local old_path = vim.env.PATH
   local ok, err = xpcall(function()
     vim.env.PATH = "/definitely-missing"

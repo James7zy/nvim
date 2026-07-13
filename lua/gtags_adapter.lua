@@ -115,12 +115,8 @@ local function current_context()
   apply_context(context)
   if context.mode == "automatic" then
     local files = vim.b.gutentags_files
-    local database = type(files) == "table" and files.gtags_cscope or nil
-    if type(database) ~= "string" or database == "" then
-      return nil, "Gutentags 尚未为当前项目准备数据库"
-    end
     context.root = vim.b.gutentags_root or context.root
-    context.database = database
+    context.database = type(files) == "table" and files.gtags_cscope or nil
   end
   if context.mode == "disabled" then
     return context, context.root .. " 包含 .notags；请先手动生成 GTAGS"
@@ -195,6 +191,11 @@ function M.find(kind)
   end
   if context.mode == "disabled" or context.mode == "unconfigured" then
     notify(context_error, vim.log.levels.WARN)
+    return false
+  end
+  if context.mode == "automatic"
+      and (type(context.database) ~= "string" or context.database == "") then
+    notify("Gutentags 尚未为当前项目准备数据库", vim.log.levels.WARN)
     return false
   end
   local missing = missing_tools({ "global", "gtags-cscope" })
@@ -321,11 +322,14 @@ function M.update()
   }, function(result)
     manual_updates[context.root] = nil
     vim.schedule(function()
-      if result.code == 0 then
+      local signal = result.signal or 0
+      if result.code == 0 and signal == 0 then
         notify("手动 GTAGS 更新完成: " .. context.root)
       else
         local stderr = vim.trim(result.stderr or "")
-        notify("手动 GTAGS 更新失败 (exit " .. result.code .. ")"
+        local status = signal ~= 0 and ("signal " .. signal)
+          or ("exit " .. result.code)
+        notify("手动 GTAGS 更新失败 (" .. status .. ")"
           .. (stderr ~= "" and (": " .. stderr) or ""), vim.log.levels.ERROR)
       end
     end)
