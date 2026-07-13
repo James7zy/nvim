@@ -32,9 +32,14 @@ local function edit(path)
 end
 
 local existing_hook_calls = 0
+local existing_hook_update
 vim.g.existing_gutentags_hook_result = 1
-_G.ExistingGutentagsHook = function()
+_G.ExistingGutentagsHook = function(path)
   existing_hook_calls = existing_hook_calls + 1
+  if existing_hook_update and path == existing_hook_update.path then
+    vim.b.gutentags_root = existing_hook_update.root
+    vim.b.gutentags_files = vim.deepcopy(existing_hook_update.files)
+  end
   return vim.g.existing_gutentags_hook_result
 end
 vim.cmd([[
@@ -145,8 +150,12 @@ end)
 test("chains an existing Gutentags init hook", function()
   local root = temp_root .. "/existing-hook"
   local source = root .. "/hook.c"
+  local second_root = temp_root .. "/existing-hook-second"
+  local second_source = second_root .. "/hook-second.c"
   vim.fn.mkdir(root .. "/.git", "p")
+  vim.fn.mkdir(second_root .. "/.git", "p")
   write(source, { "int hook_symbol;" })
+  write(second_source, { "int hook_second_symbol;" })
   edit(source)
   local before = existing_hook_calls
 
@@ -179,6 +188,28 @@ test("chains an existing Gutentags init hook", function()
     reload_hook_calls = existing_hook_calls,
     reload_result = reload_result,
   })
+
+  eq(root, vim.b.gutentags_hybrid_root)
+  local destination_files = {
+    gtags_cscope = second_root .. "/generated-GTAGS",
+  }
+  existing_hook_update = {
+    files = destination_files,
+    path = second_source,
+    root = second_root,
+  }
+  local before_transition = existing_hook_calls
+  eq(1, guard(second_source))
+  eq(before_transition + 1, existing_hook_calls)
+  eq(second_root, vim.b.gutentags_hybrid_root)
+  eq({
+    gutentags_files = destination_files,
+    gutentags_root = second_root,
+  }, {
+    gutentags_files = vim.b.gutentags_files,
+    gutentags_root = vim.b.gutentags_root,
+  })
+  existing_hook_update = nil
 end)
 
 local function run()

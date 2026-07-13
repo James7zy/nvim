@@ -44,16 +44,21 @@ local function classify(path)
   return { mode = "unconfigured" }
 end
 
-local function apply_context(context)
+local function apply_context(context, hook_changes)
   local previous_mode = vim.b.gutentags_hybrid_mode
   local previous_root = vim.b.gutentags_hybrid_root
-  local must_clear = previous_root ~= nil and previous_root ~= context.root
-    or context.mode == "disabled"
+  local clear_unconditionally = context.mode == "disabled"
     or context.mode == "unconfigured"
+  local must_clear = clear_unconditionally
+    or previous_root ~= nil and previous_root ~= context.root
     or (context.mode == "automatic" and previous_mode == "manual")
   if must_clear then
-    vim.b.gutentags_root = nil
-    vim.b.gutentags_files = nil
+    if clear_unconditionally or not (hook_changes and hook_changes.gutentags_root) then
+      vim.b.gutentags_root = nil
+    end
+    if clear_unconditionally or not (hook_changes and hook_changes.gutentags_files) then
+      vim.b.gutentags_files = nil
+    end
   end
   vim.b.gutentags_hybrid_mode = context.mode
   vim.b.gutentags_hybrid_root = context.root
@@ -67,9 +72,9 @@ local function apply_context(context)
   vim.b.gutentags_files = files
 end
 
-local function hybrid_guard(path)
+local function hybrid_guard(path, hook_changes)
   local context = classify(path)
-  apply_context(context)
+  apply_context(context, hook_changes)
   return (context.mode == "manual" or context.mode == "disabled") and 0 or 1
 end
 
@@ -82,10 +87,19 @@ function M.setup()
     if type(state.previous_init_hook) == "string"
         and state.previous_init_hook ~= ""
         and state.previous_init_hook ~= "GutentagsHybridGuard" then
+      local before_root = vim.b.gutentags_root
+      local before_files = vim.b.gutentags_files
+      if type(before_files) == "table" then
+        before_files = vim.deepcopy(before_files)
+      end
       local ok, allowed = pcall(vim.fn.call, state.previous_init_hook, { path })
       if not ok or vim.fn.empty(allowed) == 1 then
         return 0
       end
+      return hybrid_guard(path, {
+        gutentags_files = not vim.deep_equal(before_files, vim.b.gutentags_files),
+        gutentags_root = not vim.deep_equal(before_root, vim.b.gutentags_root),
+      })
     end
     return hybrid_guard(path)
   end
