@@ -28,13 +28,21 @@ return {
 
       vim.env.GTAGSLABEL = "native-pygments"
       if vim.fn.executable("gtags") == 1 then
-        local result = vim.system({ "gtags", "--config=datadir" }, { text = true }):wait()
-        if result.code == 0 then
-          local config = vim.trim(result.stdout or "") .. "/gtags/gtags.conf"
-          if vim.fn.filereadable(config) == 1 then
-            vim.env.GTAGSCONF = config
+        pcall(function()
+          local result = vim.system(
+            { "gtags", "--config=datadir" }, { text = true }
+          ):wait(1000)
+          if type(result) == "table" and result.code == 0
+              and (result.signal or 0) == 0 and type(result.stdout) == "string" then
+            local datadir = vim.trim(result.stdout)
+            if datadir ~= "" then
+              local config = datadir .. "/gtags/gtags.conf"
+              if vim.fn.filereadable(config) == 1 then
+                vim.env.GTAGSCONF = config
+              end
+            end
           end
-        end
+        end)
       end
 
       require("gtags_adapter").setup()
