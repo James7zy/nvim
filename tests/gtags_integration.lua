@@ -9,10 +9,16 @@ local auto_cache_dir
 local auto_buf
 local automatic_db
 local blocked_gtags_release
+local blocked_gtags_release_notags
 local manual_root
+local migrated_automatic_db
+local migrated_cache_dir
+local original_cache_dir
 local original_gtags_executable
 local original_gtags_started_env
 local original_gtags_release_env
+local notags_automatic_db
+local notags_cache_dir
 local transition_manual_db
 vim.fn.mkdir(temp_root, "p")
 
@@ -25,8 +31,14 @@ local function release_blocked_gtags()
   if blocked_gtags_release then
     write(blocked_gtags_release, {})
   end
+  if blocked_gtags_release_notags then
+    write(blocked_gtags_release_notags, {})
+  end
   if original_gtags_executable then
     vim.g.gutentags_gtags_executable = original_gtags_executable
+  end
+  if original_cache_dir then
+    vim.g.gutentags_cache_dir = original_cache_dir
   end
   if original_gtags_started_env ~= nil then
     vim.env.GTAGS_TEST_STARTED = original_gtags_started_env
@@ -78,6 +90,14 @@ local function jobs(bufnr)
     return current, nil
   end
   return nil, tostring(current)
+end
+
+local function job_index(database)
+  local ok, index = pcall(vim.fn["gutentags#find_job_index_by_tags_file"],
+    "gtags_cscope", database)
+  assert(ok, index)
+  assert(type(index) == "number", "Gutentags returned an invalid job index")
+  return index
 end
 
 local function cache_entries()
@@ -237,6 +257,7 @@ local function run()
   })
   assert(vim.uv.fs_chmod(blocking_gtags, 493))
   original_gtags_executable = vim.g.gutentags_gtags_executable
+  original_cache_dir = vim.g.gutentags_cache_dir
   original_gtags_started_env = vim.env.GTAGS_TEST_STARTED
   original_gtags_release_env = vim.env.GTAGS_TEST_RELEASE
   vim.env.GTAGS_TEST_STARTED = blocked_gtags_started
@@ -273,18 +294,32 @@ local function run()
   assert(vim.fn.search("auto_symbol", "cw") > 0,
     "automatic symbol is missing before live reclassification")
   cursor_on("auto_symbol")
-  vim.fn["gutentags#rescan"]()
+  migrated_cache_dir = temp_root .. "/migrated-cache"
+  vim.g.gutentags_cache_dir = migrated_cache_dir
+  local generate_on_missing = vim.g.gutentags_generate_on_missing
+  local generate_on_new = vim.g.gutentags_generate_on_new
+  vim.g.gutentags_generate_on_missing = 0
+  vim.g.gutentags_generate_on_new = 0
+  local rescan_ok, rescan_error = pcall(vim.fn["gutentags#rescan"])
+  vim.g.gutentags_generate_on_missing = generate_on_missing
+  vim.g.gutentags_generate_on_new = generate_on_new
+  assert(rescan_ok, rescan_error)
   assert(vim.b.gutentags_hybrid_mode == "automatic",
     "active rescan changed the hybrid mode")
   assert(vim.b.gutentags_root == automatic_root,
     "active rescan changed the automatic root")
-  assert(vim.deep_equal(vim.b.gutentags_files, automatic_files),
-    "active rescan did not restore automatic cache metadata")
+  local migrated_files = vim.deepcopy(vim.b.gutentags_files)
+  migrated_automatic_db = assert(migrated_files.gtags_cscope)
+  assert(migrated_automatic_db ~= automatic_db,
+    "rescan did not migrate the automatic cache target")
+  assert(job_index(migrated_automatic_db) < 0
+      and job_index(automatic_db) >= 0,
+    "cache migration did not leave only the old target active")
   vim.wait(100)
   assert(vim.b.gutentags_hybrid_mode == "automatic",
     "scheduled active rescan changed the hybrid mode")
-  assert(vim.deep_equal(vim.b.gutentags_files, automatic_files),
-    "scheduled active rescan changed automatic cache metadata")
+  assert(vim.deep_equal(vim.b.gutentags_files, migrated_files),
+    "scheduled active rescan changed migrated cache metadata")
 
   local transition_notifications = {}
   local original_notify = vim.notify
@@ -305,7 +340,7 @@ local function run()
   vim.wait(100)
   assert(vim.b.gutentags_hybrid_mode == "automatic")
   assert(vim.b.gutentags_root == automatic_root)
-  assert(vim.deep_equal(vim.b.gutentags_files, automatic_files),
+  assert(vim.deep_equal(vim.b.gutentags_files, migrated_files),
     "deferred transition changed automatic database metadata")
   local write_hooks = vim.api.nvim_get_autocmds({
     group = "gutentags_buffer_" .. auto_buf,
@@ -314,6 +349,14 @@ local function run()
   })
   assert(#write_hooks == 1,
     "deferred transition detached the automatic write hook")
+
+  assert(not require("gtags_adapter").find("g"),
+    "idle migrated target hid the active old-cache writer")
+  vim.wait(100)
+  assert(vim.b.gutentags_hybrid_mode == "automatic",
+    "old-cache writer did not block the migrated transition")
+  assert(vim.deep_equal(vim.b.gutentags_files, migrated_files),
+    "old-cache writer changed migrated cache metadata")
 
   local gap_rescans = 0
   local gap_snapshot
@@ -342,28 +385,33 @@ local function run()
   vim.g.gutentags_gtags_executable = original_gtags_executable
   write(blocked_gtags_release, {})
   assert(vim.wait(30000, function()
-    local current = jobs(auto_buf)
     return auto_updates >= updates_before_release + 2
-      and type(current) == "table" and #current == 0
+      and job_index(automatic_db) < 0
+      and job_index(migrated_automatic_db) < 0
   end, 50), "blocked and queued automatic GTAGS updates did not drain")
   assert(gap_rescans == 1, "queued replay did not exercise rescan completion gap")
   assert(gap_snapshot.mode == "automatic",
     "completion-gap rescan changed the hybrid mode")
   assert(gap_snapshot.root == automatic_root,
     "completion-gap rescan changed the automatic root")
-  assert(vim.deep_equal(gap_snapshot.files, automatic_files),
+  assert(vim.deep_equal(gap_snapshot.files, migrated_files),
     "completion-gap rescan did not restore automatic cache metadata")
   assert(vim.b.gutentags_hybrid_mode == "automatic",
     "queued replay completion changed the hybrid mode")
-  assert(vim.deep_equal(vim.b.gutentags_files, automatic_files),
+  assert(vim.deep_equal(vim.b.gutentags_files, migrated_files),
     "queued replay completion changed automatic cache metadata")
   pcall(vim.api.nvim_del_augroup_by_name, "gtags_integration_rescan_gap")
   release_blocked_gtags()
   blocked_gtags_release = nil
 
   assert(not require("gtags_adapter").find("g"),
-    "quiescent retry did not defer metadata mutation to the event loop")
+    "quiescent migrated target was not staged for adoption")
   assert(vim.b.gutentags_hybrid_mode == "automatic")
+  vim.wait(100)
+  assert(vim.b.gutentags_hybrid_mode == "automatic",
+    "candidate target transitioned without an exact follow-up pass")
+  assert(not require("gtags_adapter").find("g"),
+    "exact migrated-target pass did not defer metadata mutation")
   assert(vim.wait(1000, function()
     return vim.b[auto_buf].gutentags_hybrid_mode == "manual"
   end, 10), "scheduled live manual transition did not complete")
@@ -390,6 +438,90 @@ local function run()
     }):wait()
     return (result.stdout or ""):find("queued_race_symbol", 1, true) ~= nil
   end, 100), "explicit manual update did not index the queued-race symbol")
+
+  local notags_root = temp_root .. "/notags-live"
+  local notags_source = notags_root .. "/notags.c"
+  vim.fn.mkdir(notags_root .. "/.git", "p")
+  write(notags_source, { "int notags_live_symbol(void) { return 8; }" })
+  edit(notags_source)
+  local notags_buf = vim.api.nvim_get_current_buf()
+  notags_automatic_db = assert(vim.b.gutentags_files.gtags_cscope)
+  notags_cache_dir = vim.fs.dirname(notags_automatic_db)
+  assert(vim.wait(30000, function()
+    return vim.fn.filereadable(notags_automatic_db) == 1
+      and job_index(notags_automatic_db) < 0
+  end, 50), ".notags automatic fixture build timed out")
+  cursor_on("notags_live_symbol")
+  assert(require("gtags_adapter").find("g"))
+  local trusted_notags_files = vim.deepcopy(vim.b.gutentags_files)
+  local notags_user_writes = 0
+  local notags_user_group = vim.api.nvim_create_augroup(
+    "gtags_integration_notags_user", { clear = true }
+  )
+  vim.api.nvim_create_autocmd("BufWritePost", {
+    group = notags_user_group,
+    buffer = notags_buf,
+    callback = function() notags_user_writes = notags_user_writes + 1 end,
+  })
+
+  local notags_started = temp_root .. "/notags-gtags-started"
+  blocked_gtags_release_notags = temp_root .. "/notags-gtags-release"
+  vim.env.GTAGS_TEST_STARTED = notags_started
+  vim.env.GTAGS_TEST_RELEASE = blocked_gtags_release_notags
+  vim.g.gutentags_gtags_executable = blocking_gtags
+  assert(require("gtags_adapter").update())
+  assert(vim.wait(10000, function()
+    return vim.fn.filereadable(notags_started) == 1
+      and job_index(notags_automatic_db) >= 0
+  end, 50), ".notags blocking update did not start")
+  vim.api.nvim_buf_set_lines(notags_buf, -1, -1, false, {
+    "int notags_queued_symbol(void) { return 9; }",
+  })
+  vim.cmd("silent write")
+  write(notags_root .. "/.notags", {})
+  vim.fn["gutentags#rescan"]()
+  assert(vim.b.gutentags_hybrid_mode == "automatic",
+    ".notags rescan changed mode while automatic work was active")
+  assert(vim.b.gutentags_root == notags_root,
+    ".notags rescan changed the trusted automatic root")
+  assert(vim.deep_equal(vim.b.gutentags_files, trusted_notags_files),
+    ".notags rescan did not restore trusted automatic metadata")
+  local notags_hooks = vim.api.nvim_get_autocmds({
+    group = "gutentags_buffer_" .. notags_buf,
+    event = "BufWritePost",
+    buffer = notags_buf,
+  })
+  assert(#notags_hooks == 1,
+    ".notags rescan detached the automatic hook before drain")
+  vim.wait(100)
+  assert(vim.b.gutentags_hybrid_mode == "automatic")
+
+  local notags_updates_before_release = auto_updates
+  vim.g.gutentags_gtags_executable = original_gtags_executable
+  write(blocked_gtags_release_notags, {})
+  assert(vim.wait(30000, function()
+    return auto_updates >= notags_updates_before_release + 2
+      and job_index(notags_automatic_db) < 0
+  end, 50), ".notags blocked and queued updates did not drain")
+  release_blocked_gtags()
+  blocked_gtags_release_notags = nil
+  assert(not require("gtags_adapter").update())
+  assert(vim.wait(1000, function()
+    return vim.b[notags_buf].gutentags_hybrid_mode == "disabled"
+  end, 10), ".notags transition did not reach disabled mode")
+  assert(vim.b.gutentags_root == nil)
+  assert(vim.b.gutentags_files == nil)
+  notags_hooks = vim.api.nvim_get_autocmds({
+    group = "gutentags_buffer_" .. notags_buf,
+    event = "BufWritePost",
+    buffer = notags_buf,
+  })
+  assert(#notags_hooks == 0,
+    ".notags disabled transition retained the automatic hook")
+  local notags_user_writes_before_check = notags_user_writes
+  vim.api.nvim_exec_autocmds("BufWritePost", { buffer = notags_buf })
+  assert(notags_user_writes == notags_user_writes_before_check + 1,
+    ".notags disabled transition removed the unrelated user hook")
 
   manual_root = temp_root .. "/manual"
   local manual_source = manual_root .. "/manual.c"
@@ -499,7 +631,10 @@ local function cleanup()
       error("automatic job inspection failed: " .. last_job_error)
     end
     last_path_jobs = {}
-    for _, database in ipairs({ automatic_db, transition_manual_db }) do
+    for _, database in ipairs({
+      automatic_db, migrated_automatic_db, notags_automatic_db,
+      transition_manual_db,
+    }) do
       if database then
         local ok, index = pcall(vim.fn["gutentags#find_job_index_by_tags_file"],
           "gtags_cscope", database)
@@ -534,6 +669,13 @@ local function cleanup()
     deleted, result = pcall(vim.fn.delete, auto_cache_dir, "rf")
     if not deleted or result ~= 0 then
       failures[#failures + 1] = "failed to delete automatic cache fixture: "
+        .. tostring(result)
+    end
+  end
+  if notags_cache_dir then
+    deleted, result = pcall(vim.fn.delete, notags_cache_dir, "rf")
+    if not deleted or result ~= 0 then
+      failures[#failures + 1] = "failed to delete .notags cache fixture: "
         .. tostring(result)
     end
   end

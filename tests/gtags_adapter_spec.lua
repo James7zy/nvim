@@ -64,9 +64,13 @@ write(temp_root .. "/autoload/gutentags.vim", {
   "function! gutentags#inprogress() abort",
   "  return get(g:, 'test_gutentags_jobs', [])",
   "endfunction",
+  "function! gutentags#find_job_index_by_tags_file(module, target) abort",
+  "  return index(get(g:, 'test_gutentags_job_targets', []), a:target)",
+  "endfunction",
 })
 vim.opt.runtimepath:prepend(temp_root)
 vim.g.test_gutentags_jobs = {}
+vim.g.test_gutentags_job_targets = {}
 
 local function install_write_hooks(bufnr, user_group_name)
   local calls = { gutentags = 0, user = 0 }
@@ -309,6 +313,108 @@ test("defers rescan until automatic metadata is restored and quiescent", functio
   vim.api.nvim_exec_autocmds("BufWritePost", { buffer = bufnr })
   eq({ gutentags = 1, user = 2 }, writes)
   vim.g.test_gutentags_jobs = {}
+end)
+
+test("retains every migrated automatic target until exact adoption", function()
+  local root = temp_root .. "/multi-target-transition"
+  local source = root .. "/migration.c"
+  vim.fn.mkdir(root .. "/.git", "p")
+  write(source, { "int migration_symbol;" })
+  edit(source)
+
+  eq(1, guard(source))
+  local bufnr = vim.api.nvim_get_current_buf()
+  local c1 = temp_root .. "/migration-cache-1/GTAGS"
+  local c2 = temp_root .. "/migration-cache-2/GTAGS"
+  local c3 = temp_root .. "/migration-cache-3/GTAGS"
+  vim.b.gutentags_root = root
+  vim.b.gutentags_files = { gtags_cscope = c1 }
+  eq(1, guard(source))
+  local writes = install_write_hooks(
+    bufnr, "gtags_adapter_migration_user_" .. bufnr
+  )
+  write(root .. "/GTAGS", { "manual database" })
+
+  local old_path = vim.env.PATH
+  local ok, err = xpcall(function()
+    vim.env.PATH = "/definitely-missing"
+    vim.g.test_gutentags_jobs = {}
+    vim.g.test_gutentags_job_targets = { c1 }
+    vim.b.gutentags_files = { gtags_cscope = c2 }
+    eq(false, adapter.update())
+    vim.wait(100)
+    eq("automatic", vim.b.gutentags_hybrid_mode)
+    eq(c2, vim.b.gutentags_files.gtags_cscope)
+
+    vim.g.test_gutentags_job_targets = { c1, c2 }
+    vim.b.gutentags_files = { gtags_cscope = c3 }
+    eq(false, adapter.update())
+    vim.wait(100)
+    eq("automatic", vim.b.gutentags_hybrid_mode)
+    eq(c3, vim.b.gutentags_files.gtags_cscope)
+    vim.api.nvim_exec_autocmds("BufWritePost", { buffer = bufnr })
+    eq({ gutentags = 1, user = 1 }, writes)
+
+    vim.g.test_gutentags_job_targets = {}
+    eq(false, adapter.update())
+    vim.wait(100)
+    eq("automatic", vim.b.gutentags_hybrid_mode)
+    eq(c3, vim.b.gutentags_files.gtags_cscope)
+
+    eq(false, adapter.update())
+    assert(vim.wait(1000, function()
+      return vim.b[bufnr].gutentags_hybrid_mode == "manual"
+    end, 10))
+    eq(root .. "/GTAGS", vim.b.gutentags_files.gtags_cscope)
+    vim.api.nvim_exec_autocmds("BufWritePost", { buffer = bufnr })
+    eq({ gutentags = 1, user = 2 }, writes)
+  end, debug.traceback)
+  vim.env.PATH = old_path
+  vim.g.test_gutentags_jobs = {}
+  vim.g.test_gutentags_job_targets = {}
+  if not ok then error(err) end
+end)
+
+test("restores trusted automatic metadata during a notags rescan", function()
+  local root = temp_root .. "/notags-rescan"
+  local source = root .. "/notags.c"
+  vim.fn.mkdir(root .. "/.git", "p")
+  write(source, { "int notags_symbol;" })
+  edit(source)
+
+  eq(1, guard(source))
+  local bufnr = vim.api.nvim_get_current_buf()
+  local cache_files = {
+    gtags_cscope = temp_root .. "/notags-rescan-cache/GTAGS",
+  }
+  vim.b.gutentags_root = root
+  vim.b.gutentags_files = cache_files
+  eq(1, guard(source))
+  local writes = install_write_hooks(
+    bufnr, "gtags_adapter_notags_user_" .. bufnr
+  )
+  write(root .. "/.notags", {})
+
+  vim.g.test_gutentags_job_targets = { cache_files.gtags_cscope }
+  vim.b.gutentags_files = nil
+  eq(1, guard(source))
+  eq("automatic", vim.b.gutentags_hybrid_mode)
+  eq(root, vim.b.gutentags_root)
+  eq(cache_files, vim.b.gutentags_files)
+  vim.wait(100)
+  eq("automatic", vim.b.gutentags_hybrid_mode)
+  eq(cache_files, vim.b.gutentags_files)
+
+  vim.g.test_gutentags_job_targets = {}
+  eq(false, adapter.update())
+  assert(vim.wait(1000, function()
+    return vim.b[bufnr].gutentags_hybrid_mode == "disabled"
+  end, 10))
+  eq(nil, vim.b.gutentags_root)
+  eq(nil, vim.b.gutentags_files)
+  vim.api.nvim_exec_autocmds("BufWritePost", { buffer = bufnr })
+  eq({ gutentags = 0, user = 1 }, writes)
+  vim.g.test_gutentags_job_targets = {}
 end)
 
 test("keeps hybrid ownership when a chained hook switches buffers", function()
@@ -667,6 +773,75 @@ test("preserves a manual query lock across adapter reloads", function()
   end, debug.traceback)
   shared_state.manual_updates[root] = nil
   if not ok then error(err) end
+end)
+
+test("migrates legacy automatic metadata on reload", function()
+  local root = temp_root .. "/legacy-automatic-state"
+  local source = root .. "/legacy.c"
+  local target = temp_root .. "/legacy-cache/GTAGS"
+  vim.fn.mkdir(root .. "/.git", "p")
+  write(source, { "int legacy_state_symbol;" })
+  edit(source)
+
+  local bufnr = vim.api.nvim_get_current_buf()
+  local path = vim.api.nvim_buf_get_name(bufnr)
+  local shared_state = _G.NvimGutentagsHybridState
+  local previous_legacy = shared_state.automatic_metadata
+  local previous_record = shared_state.automatic_transitions[bufnr]
+  local ok, err = xpcall(function()
+    shared_state.automatic_metadata = {
+      [bufnr] = {
+        files = { gtags_cscope = target },
+        hybrid_root = root,
+        path = path,
+        root = root,
+        target = target,
+      },
+    }
+    shared_state.automatic_transitions[bufnr] = nil
+    package.loaded.gtags_adapter = nil
+    require("gtags_adapter").setup()
+
+    eq(nil, shared_state.automatic_metadata)
+    eq({
+      hybrid_root = root,
+      path = path,
+      targets = { [target] = true },
+      trusted = {
+        files = { gtags_cscope = target },
+        root = root,
+        target = target,
+      },
+    }, shared_state.automatic_transitions[bufnr])
+  end, debug.traceback)
+  shared_state.automatic_metadata = previous_legacy
+  shared_state.automatic_transitions[bufnr] = previous_record
+  if not ok then error(err) end
+end)
+
+test("cleans automatic transition state on wipeout after reload", function()
+  local root = temp_root .. "/wipeout-state"
+  local source = root .. "/wipeout.c"
+  vim.fn.mkdir(root .. "/.git", "p")
+  write(source, { "int wipeout_symbol;" })
+  edit(source)
+
+  eq(1, guard(source))
+  local bufnr = vim.api.nvim_get_current_buf()
+  vim.b.gutentags_root = root
+  vim.b.gutentags_files = {
+    gtags_cscope = temp_root .. "/wipeout-cache/GTAGS",
+  }
+  eq(1, guard(source))
+  local shared_state = _G.NvimGutentagsHybridState
+  assert(type(shared_state.automatic_transitions) == "table")
+  assert(type(shared_state.automatic_transitions[bufnr]) == "table")
+
+  package.loaded.gtags_adapter = nil
+  require("gtags_adapter").setup()
+  assert(type(shared_state.automatic_transitions[bufnr]) == "table")
+  vim.api.nvim_buf_delete(bufnr, { force = true })
+  eq(nil, shared_state.automatic_transitions[bufnr])
 end)
 
 test("blocks automatic queries while Gutentags is running", function()
