@@ -106,9 +106,13 @@ end)
 test("clears a stale manual database when the project mode changes", function()
   local root = temp_root .. "/mode-transition"
   local source = root .. "/transition.c"
+  local second_root = temp_root .. "/second-automatic"
+  local second_source = second_root .. "/second.c"
   vim.fn.mkdir(root .. "/.git", "p")
+  vim.fn.mkdir(second_root .. "/.git", "p")
   write(root .. "/GTAGS", { "manual database" })
   write(source, { "int transition_symbol;" })
+  write(second_source, { "int second_symbol;" })
   edit(source)
 
   eq(0, guard(source))
@@ -116,6 +120,14 @@ test("clears a stale manual database when the project mode changes", function()
   assert(vim.fn.delete(root .. "/GTAGS") == 0)
   eq(1, guard(source))
   eq("automatic", vim.b.gutentags_hybrid_mode)
+  eq(nil, vim.b.gutentags_root)
+  eq(nil, vim.b.gutentags_files)
+
+  vim.b.gutentags_root = root
+  vim.b.gutentags_files = { gtags_cscope = root .. "/stale-GTAGS" }
+  eq(1, guard(second_source))
+  eq("automatic", vim.b.gutentags_hybrid_mode)
+  eq(second_root, vim.b.gutentags_hybrid_root)
   eq(nil, vim.b.gutentags_root)
   eq(nil, vim.b.gutentags_files)
 end)
@@ -131,7 +143,29 @@ test("chains an existing Gutentags init hook", function()
   vim.g.existing_gutentags_hook_result = 0
   eq(0, guard(source))
   eq(before + 1, existing_hook_calls)
+
+  vim.g.existing_gutentags_hook_result = false
+  local false_result = guard(source)
+  vim.g.existing_gutentags_hook_result = ""
+  local empty_result = guard(source)
+
+  local before_reload = existing_hook_calls
+  package.loaded.gtags_adapter = nil
+  require("gtags_adapter").setup()
   vim.g.existing_gutentags_hook_result = 1
+  local reload_result = guard(source)
+
+  eq({
+    empty_result = 0,
+    false_result = 0,
+    reload_hook_calls = before_reload + 1,
+    reload_result = 1,
+  }, {
+    empty_result = empty_result,
+    false_result = false_result,
+    reload_hook_calls = existing_hook_calls,
+    reload_result = reload_result,
+  })
 end)
 
 local function run()
