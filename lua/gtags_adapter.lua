@@ -47,7 +47,7 @@ end
 local function apply_context(context)
   local previous_mode = vim.b.gutentags_hybrid_mode
   local previous_root = vim.b.gutentags_hybrid_root
-  local must_clear = previous_root ~= context.root
+  local must_clear = previous_root ~= nil and previous_root ~= context.root
     or context.mode == "disabled"
     or context.mode == "unconfigured"
     or (context.mode == "automatic" and previous_mode == "manual")
@@ -74,11 +74,9 @@ local function hybrid_guard(path)
 end
 
 function M.setup()
-  if state.configured then
-    return
+  if not state.configured then
+    state.previous_init_hook = vim.g.gutentags_init_user_func
   end
-  state.configured = true
-  state.previous_init_hook = vim.g.gutentags_init_user_func
 
   _G.NvimGutentagsHybridGuard = function(path)
     if type(state.previous_init_hook) == "string"
@@ -92,12 +90,16 @@ function M.setup()
     return hybrid_guard(path)
   end
 
+  if state.configured then
+    return
+  end
   vim.cmd([[
     function! GutentagsHybridGuard(path) abort
       return v:lua.NvimGutentagsHybridGuard(a:path)
     endfunction
   ]])
   vim.g.gutentags_init_user_func = "GutentagsHybridGuard"
+  state.configured = true
 end
 
 return M

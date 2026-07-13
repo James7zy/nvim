@@ -97,10 +97,20 @@ test("allows Gutentags at a normal project marker", function()
   vim.fn.mkdir(root .. "/.git", "p")
   write(source, { "int automatic_symbol;" })
   edit(source)
+  local hook_files = { gtags_cscope = root .. "/generated-GTAGS" }
+  vim.b.gutentags_root = root
+  vim.b.gutentags_files = hook_files
 
   eq(1, guard(source))
   eq("automatic", vim.b.gutentags_hybrid_mode)
   eq(root, vim.b.gutentags_hybrid_root)
+  eq({
+    gutentags_files = hook_files,
+    gutentags_root = root,
+  }, {
+    gutentags_files = vim.b.gutentags_files,
+    gutentags_root = vim.b.gutentags_root,
+  })
 end)
 
 test("clears a stale manual database when the project mode changes", function()
@@ -150,6 +160,7 @@ test("chains an existing Gutentags init hook", function()
   local empty_result = guard(source)
 
   local before_reload = existing_hook_calls
+  local guard_before_reload = _G.NvimGutentagsHybridGuard
   package.loaded.gtags_adapter = nil
   require("gtags_adapter").setup()
   vim.g.existing_gutentags_hook_result = 1
@@ -158,11 +169,13 @@ test("chains an existing Gutentags init hook", function()
   eq({
     empty_result = 0,
     false_result = 0,
+    guard_refreshed = true,
     reload_hook_calls = before_reload + 1,
     reload_result = 1,
   }, {
     empty_result = empty_result,
     false_result = false_result,
+    guard_refreshed = guard_before_reload ~= _G.NvimGutentagsHybridGuard,
     reload_hook_calls = existing_hook_calls,
     reload_result = reload_result,
   })
