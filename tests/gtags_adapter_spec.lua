@@ -152,10 +152,14 @@ test("chains an existing Gutentags init hook", function()
   local source = root .. "/hook.c"
   local second_root = temp_root .. "/existing-hook-second"
   local second_source = second_root .. "/hook-second.c"
+  local third_root = temp_root .. "/existing-hook-third"
+  local third_source = third_root .. "/hook-third.c"
   vim.fn.mkdir(root .. "/.git", "p")
   vim.fn.mkdir(second_root .. "/.git", "p")
+  vim.fn.mkdir(third_root .. "/.git", "p")
   write(source, { "int hook_symbol;" })
   write(second_source, { "int hook_second_symbol;" })
+  write(third_source, { "int hook_third_symbol;" })
   edit(source)
   local before = existing_hook_calls
 
@@ -191,6 +195,7 @@ test("chains an existing Gutentags init hook", function()
 
   eq(root, vim.b.gutentags_hybrid_root)
   local destination_files = {
+    ctags = second_root .. "/tags",
     gtags_cscope = second_root .. "/generated-GTAGS",
   }
   existing_hook_update = {
@@ -209,6 +214,22 @@ test("chains an existing Gutentags init hook", function()
     gutentags_files = vim.b.gutentags_files,
     gutentags_root = vim.b.gutentags_root,
   })
+
+  local mixed_files = {
+    ctags = third_root .. "/tags",
+    gtags_cscope = destination_files.gtags_cscope,
+  }
+  existing_hook_update = {
+    files = mixed_files,
+    path = third_source,
+    root = third_root,
+  }
+  local before_mixed_transition = existing_hook_calls
+  eq(1, guard(third_source))
+  eq(before_mixed_transition + 1, existing_hook_calls)
+  eq(third_root, vim.b.gutentags_hybrid_root)
+  eq(third_root, vim.b.gutentags_root)
+  eq({ ctags = mixed_files.ctags }, vim.b.gutentags_files)
   existing_hook_update = nil
 end)
 

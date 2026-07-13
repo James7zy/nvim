@@ -44,6 +44,23 @@ local function classify(path)
   return { mode = "unconfigured" }
 end
 
+local function refreshed_files(before_files, after_files)
+  local refreshed = {}
+  if type(after_files) ~= "table" then
+    return refreshed
+  end
+  for key, value in pairs(after_files) do
+    local before_value
+    if type(before_files) == "table" then
+      before_value = before_files[key]
+    end
+    if not vim.deep_equal(before_value, value) then
+      refreshed[key] = type(value) == "table" and vim.deepcopy(value) or value
+    end
+  end
+  return refreshed
+end
+
 local function apply_context(context, hook_changes)
   local previous_mode = vim.b.gutentags_hybrid_mode
   local previous_root = vim.b.gutentags_hybrid_root
@@ -56,8 +73,11 @@ local function apply_context(context, hook_changes)
     if clear_unconditionally or not (hook_changes and hook_changes.gutentags_root) then
       vim.b.gutentags_root = nil
     end
-    if clear_unconditionally or not (hook_changes and hook_changes.gutentags_files) then
+    local files = hook_changes and hook_changes.gutentags_files
+    if clear_unconditionally or not files or not next(files) then
       vim.b.gutentags_files = nil
+    else
+      vim.b.gutentags_files = files
     end
   end
   vim.b.gutentags_hybrid_mode = context.mode
@@ -97,7 +117,7 @@ function M.setup()
         return 0
       end
       return hybrid_guard(path, {
-        gutentags_files = not vim.deep_equal(before_files, vim.b.gutentags_files),
+        gutentags_files = refreshed_files(before_files, vim.b.gutentags_files),
         gutentags_root = not vim.deep_equal(before_root, vim.b.gutentags_root),
       })
     end
