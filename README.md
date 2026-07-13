@@ -188,13 +188,14 @@ return {
 
 ### 大型代码库符号跳转（Gutentags / GNU GLOBAL）
 
-本配置用三层协作完成跨文件符号查询：
+本配置用四层协作完成跨文件符号查询：
 
-- `vim-gutentags` 在后台生成并增量更新 GNU GLOBAL 数据库。
-- `gutentags_plus` 为当前 buffer 选择正确数据库并执行 `gtags-cscope` 查询。
+- `vim-gutentags` 在自动模式下后台生成并增量更新 GNU GLOBAL 数据库。
+- `gtags_adapter` 判定索引模式，为当前 buffer 设置数据库上下文，守卫查询与建库/更新作业，并分派更新、路由查询结果。
+- `gutentags_plus` 按 `gtags_adapter` 为当前 buffer 提供的数据库上下文执行 `gtags-cscope` 查询。
 - `fzf-lua` 展示多条结果；单条结果直接跳转。
 
-系统需要 `gtags`、`global`、`gtags-cscope`。配置使用 `native-pygments`，因此索引非 GNU GLOBAL 原生语言时还需要 Python 与 Pygments。由于 Neovim 0.9 已移除原生 cscope，这里使用带兼容补丁的 `skywind3000/vim-gutentags`，不再加载 `cscope_maps.nvim`。
+查询依赖 `global` 与 `gtags-cscope`；自动模式生成和更新数据库还需要 `gtags`；手动模式的 `<leader>gb` 运行 `global -u`。配置使用 `native-pygments`，因此索引非 GNU GLOBAL 原生语言时还需要 Python 与 Pygments。由于 Neovim 0.9 已移除原生 cscope，这里使用带兼容补丁的 `skywind3000/vim-gutentags`，不再加载 `cscope_maps.nvim`。
 
 索引模式按当前文件向上逐级判断，遇到第一个项目边界即停止：
 
@@ -202,7 +203,29 @@ return {
 2. 同一层有 `.notags`：禁止自动索引，适合尚未手动建库的大仓库。
 3. 同一层有 `.git`、`.root`、`.project` 等：自动模式，数据库保存到 `stdpath("cache")/gutentags`。
 
-非版本库项目可在根目录创建空的 `.root`。新的大型仓库应先创建 `.notags`，再在根目录运行合适的建库命令：普通项目运行 `gtags`，Linux 内核运行 `make gtags`。已有项目内 `GTAGS` 时不需要保留 `.notags`。
+非版本库项目可在根目录创建空的 `.root`。新的大型仓库必须在第一次用 Neovim 打开仓库内文件之前放置 `.notags`。若已有 Neovim 会话正在使用该仓库，先全部关闭，再从 shell 在项目根执行：
+
+```bash
+cd /path/to/project && touch .notags
+```
+
+不要通过在 Neovim 中新建 `.notags` buffer 来创建它；打开这个新 buffer 本身就可能触发首次自动索引。
+
+shell 中运行的 `gtags` 或 `make gtags` 不会继承仅在 Neovim 内设置的环境。准备手动建库时，在项目根使用：
+
+```bash
+(
+  export GTAGSLABEL=native-pygments
+  export GTAGSCONF="$(gtags --config=datadir)/gtags/gtags.conf"
+  test -r "$GTAGSCONF" || {
+    printf 'GTAGSCONF is not readable: %s\n' "$GTAGSCONF" >&2
+    exit 1
+  }
+  gtags                    # 普通项目；Linux 内核改为 make gtags
+)
+```
+
+这样可使首次手动生成与以后 Neovim 中的 `global -u` 更新使用一致的解析器配置，尤其适用于非 GNU GLOBAL 原生语言。已有项目内 `GTAGS` 时不需要保留 `.notags`。
 
 查询键：
 
@@ -214,14 +237,14 @@ return {
 | `<leader>gt` | 文本 |
 | `<leader>ge` | egrep |
 | `<leader>gf` | 文件 |
-| `<leader>gi` | include 当前文件的位置 |
+| `<leader>gi` | 查找哪些文件 include 光标下的文件名 |
 | `<leader>gb` | 更新当前项目索引 |
 
-首次自动建库或索引更新期间，查询会提示等待，避免读取尚未完成的数据库。自动模式的 `<leader>gb` 调用 `GutentagsUpdate`；手动模式异步运行 `global -u`。
+首次自动建库或索引更新期间，查询会提示等待，避免读取尚未完成的数据库。自动模式的 `<leader>gb` 调用 `GutentagsUpdate`；手动模式异步运行 `global -u`。`.notags` 禁用模式下，`<leader>gb` 不会建库或更新任何内容，只会提示手动创建数据库。
 
 排错：
 
-- `:GutentagsToggleTrace` 开启日志，保存文件或执行 `:GutentagsUpdate` 后用 `:messages` 查看。
+- 自动模式可用 `:GutentagsToggleTrace` 开启日志，保存文件或执行 `:GutentagsUpdate` 后用 `:messages` 查看；手动模式和 `.notags` 禁用模式不会启动 Gutentags 作业。
 - 提示找不到项目根时，在正确目录创建 `.root`。
 - 自动缓存损坏时，退出正在使用该项目的 Neovim，删除提示路径所在的缓存子目录，再重新打开文件建库。
 - 手动数据库损坏时，不要让配置自动删除源码树文件；在项目根按项目要求重新运行 `gtags` 或 `make gtags`。
