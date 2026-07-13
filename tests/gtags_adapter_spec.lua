@@ -558,10 +558,10 @@ test("runs one asynchronous global update per manual project", function()
   edit(source)
   local old_system = vim.system
   local calls = {}
-  local callback
+  local callbacks = {}
   vim.system = function(cmd, opts, cb)
     calls[#calls + 1] = { cmd = cmd, opts = opts }
-    callback = cb
+    callbacks[#callbacks + 1] = cb
     return { pid = 1234 }
   end
 
@@ -573,12 +573,26 @@ test("runs one asynchronous global update per manual project", function()
     eq(root, calls[1].opts.cwd)
     eq(root, calls[1].opts.env.GTAGSROOT)
     eq(root, calls[1].opts.env.GTAGSDBPATH)
-    callback({ code = 0, stdout = "", stderr = "" })
+    eq(true, calls[1].opts.text)
+
+    local before_completion = #notifications
+    callbacks[1]({ code = 0, stdout = "", stderr = "" })
     assert(vim.wait(1000, function()
-      return notifications[#notifications].message:find("更新完成", 1, true) ~= nil
+      return #notifications == before_completion + 1
     end))
+    eq("手动 GTAGS 更新完成: " .. root, notifications[#notifications].message)
+
+    eq(true, adapter.update())
+    eq(2, #calls)
+    local before_retry_completion = #notifications
+    callbacks[2]({ code = 0, stdout = "", stderr = "" })
+    assert(vim.wait(1000, function()
+      return #notifications == before_retry_completion + 1
+    end))
+    eq(nil, _G.NvimGutentagsHybridState.manual_updates[root])
   end, debug.traceback)
   vim.system = old_system
+  _G.NvimGutentagsHybridState.manual_updates[root] = nil
   if not ok then error(err) end
 end)
 
@@ -594,7 +608,7 @@ test("does not build automatically inside a disabled project", function()
 end)
 
 test("reports a failed manual global update", function()
-  local _, source = manual_query_fixture("update-failure")
+  local root, source = manual_query_fixture("update-failure")
   edit(source)
   local old_system = vim.system
   local callback
@@ -605,13 +619,17 @@ test("reports a failed manual global update", function()
 
   local ok, err = xpcall(function()
     eq(true, adapter.update())
-    callback({ code = 2, stdout = "", stderr = "database locked" })
+    local before_notifications = #notifications
+    callback({ code = 2, stdout = "", stderr = "  database locked\n" })
     assert(vim.wait(1000, function()
-      local last = notifications[#notifications]
-      return last and last.message:find("database locked", 1, true) ~= nil
+      return #notifications == before_notifications + 1
     end))
+    local notification = notifications[#notifications]
+    eq(vim.log.levels.ERROR, notification.level)
+    eq("手动 GTAGS 更新失败 (exit 2): database locked", notification.message)
   end, debug.traceback)
   vim.system = old_system
+  _G.NvimGutentagsHybridState.manual_updates[root] = nil
   if not ok then error(err) end
 end)
 
@@ -664,15 +682,34 @@ test("checks gtags only for automatic updates", function()
   local ok, err = xpcall(function()
     vim.env.PATH = "/definitely-missing"
     eq(false, adapter.update())
-    assert(notifications[#notifications].message:find("gtags", 1, true))
+    local notification = notifications[#notifications]
+    eq(vim.log.levels.ERROR, notification.level)
+    eq("缺少索引命令: gtags", notification.message)
+    eq(nil, notification.message:find("global", 1, true))
+    eq(nil, notification.message:find("gtags-cscope", 1, true))
   end, debug.traceback)
   vim.env.PATH = old_path
   if not ok then error(err) end
 end)
 
 test("installs the leader-g update map", function()
-  local mapping = vim.fn.maparg("<leader>gb", "n", false, true)
-  assert(type(mapping) == "table" and mapping.desc, "missing map <leader>gb")
+  local current_adapter = require("gtags_adapter")
+  local original_update = current_adapter.update
+  local calls = 0
+  local ok, err = xpcall(function()
+    local mapping = vim.fn.maparg("<leader>gb", "n", false, true)
+    assert(type(mapping) == "table" and mapping.desc, "missing map <leader>gb")
+    assert(mapping.desc:find("^GTAGS:"), "unexpected map description")
+    eq(1, mapping.silent)
+
+    current_adapter.update = function()
+      calls = calls + 1
+    end
+    mapping.callback()
+    eq(1, calls)
+  end, debug.traceback)
+  current_adapter.update = original_update
+  if not ok then error(err) end
 end)
 
 local function run()
