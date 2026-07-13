@@ -305,6 +305,20 @@ block_automatic_observation = function(bufnr)
   end
 end
 
+local function transition_observe_automatic_metadata(bufnr, metadata)
+  local observer = automatic_observer_state[bufnr]
+  if observer ~= nil then
+    if not valid_automatic_observer(observer) then
+      block_automatic_observation(bufnr)
+      return nil
+    end
+    if observer.pending then
+      return nil
+    end
+  end
+  return observe_automatic_metadata(bufnr, metadata, false)
+end
+
 local function schedule_automatic_metadata_observer(bufnr, path, context)
   if automatic_transition_state_is_invalid()
       or not vim.api.nvim_buf_is_valid(bufnr) then
@@ -510,7 +524,8 @@ schedule_context_transition = function(bufnr, path, context)
   end
   local buffer = vim.b[bufnr]
   local metadata = automatic_metadata(bufnr)
-  local record = metadata and observe_automatic_metadata(bufnr, metadata, false)
+  local record = metadata
+      and transition_observe_automatic_metadata(bufnr, metadata)
     or automatic_transition_state[bufnr]
   local record_matches = automatic_record_matches(
     record, bufnr, path, buffer.gutentags_hybrid_root)
@@ -545,7 +560,7 @@ schedule_context_transition = function(bufnr, path, context)
     end
     local current_metadata = automatic_metadata(bufnr)
     local current_record = current_metadata
-        and observe_automatic_metadata(bufnr, current_metadata, false)
+        and transition_observe_automatic_metadata(bufnr, current_metadata)
       or automatic_transition_state[bufnr]
     if not automatic_record_matches(
         current_record, bufnr, path, current.gutentags_hybrid_root) then

@@ -530,6 +530,128 @@ test("blocks malformed observer state during current-context refresh", function(
   state.automatic_observers[bufnr] = nil
 end)
 
+test("does not observe a pending target during nonautomatic transition", function()
+  local root = temp_root .. "/pending-transition-observer"
+  local source = root .. "/pending-transition.c"
+  local c1 = temp_root .. "/pending-transition-cache-1/GTAGS"
+  local c2 = temp_root .. "/pending-transition-cache-2/GTAGS"
+  vim.fn.mkdir(root .. "/.git", "p")
+  write(source, { "int pending_transition_symbol;" })
+  edit(source)
+
+  eq(1, guard(source))
+  local bufnr = vim.api.nvim_get_current_buf()
+  vim.b.gutentags_root = root
+  vim.b.gutentags_files = { gtags_cscope = c1 }
+  wait_for_trusted_target(bufnr, c1)
+  local record = _G.NvimGutentagsHybridState.automatic_transitions[bufnr]
+
+  vim.b.gutentags_files = { gtags_cscope = c2 }
+  eq(1, guard(source))
+  write(root .. "/GTAGS", { "manual database" })
+  local old_path = vim.env.PATH
+  local ok, err = xpcall(function()
+    vim.env.PATH = "/definitely-missing"
+    eq(false, adapter.update())
+    eq(c1, record.trusted.target)
+    eq(nil, record.candidate)
+    eq({ [c1] = true }, record.targets)
+    vim.wait(100)
+    eq("automatic", vim.b.gutentags_hybrid_mode)
+    eq(c1, record.trusted.target)
+    eq(nil, record.candidate)
+    eq({ [c1] = true }, record.targets)
+  end, debug.traceback)
+  vim.env.PATH = old_path
+  if not ok then error(err) end
+end)
+
+test("blocks malformed observer during nonautomatic transition", function()
+  local root = temp_root .. "/malformed-transition-observer"
+  local source = root .. "/malformed-transition.c"
+  local c1 = temp_root .. "/malformed-transition-cache-1/GTAGS"
+  local c2 = temp_root .. "/malformed-transition-cache-2/GTAGS"
+  vim.fn.mkdir(root .. "/.git", "p")
+  write(source, { "int malformed_transition_symbol;" })
+  edit(source)
+
+  eq(1, guard(source))
+  local bufnr = vim.api.nvim_get_current_buf()
+  vim.b.gutentags_root = root
+  vim.b.gutentags_files = { gtags_cscope = c1 }
+  wait_for_trusted_target(bufnr, c1)
+  local state = _G.NvimGutentagsHybridState
+  local record = state.automatic_transitions[bufnr]
+  state.automatic_observers[bufnr] = "malformed"
+  vim.b.gutentags_files = { gtags_cscope = c2 }
+  write(root .. "/GTAGS", { "manual database" })
+
+  local old_path = vim.env.PATH
+  local ok, err = xpcall(function()
+    vim.env.PATH = "/definitely-missing"
+    eq(false, adapter.update())
+    eq(true, record.observer_conflict)
+    eq(nil, record.candidate)
+    eq({ [c1] = true }, record.targets)
+    vim.wait(100)
+    eq("automatic", vim.b.gutentags_hybrid_mode)
+    eq(true, record.observer_conflict)
+    eq(nil, record.candidate)
+    eq({ [c1] = true }, record.targets)
+  end, debug.traceback)
+  vim.env.PATH = old_path
+  state.automatic_observers[bufnr] = nil
+  if not ok then error(err) end
+end)
+
+test("rechecks observer state in scheduled transition callback", function()
+  local old_path = vim.env.PATH
+  local ok, err = xpcall(function()
+    vim.env.PATH = "/definitely-missing"
+    for _, kind in ipairs({ "pending", "malformed" }) do
+      local root = temp_root .. "/callback-observer-" .. kind
+      local source = root .. "/callback.c"
+      local c1 = temp_root .. "/callback-cache-1-" .. kind .. "/GTAGS"
+      local c2 = temp_root .. "/callback-cache-2-" .. kind .. "/GTAGS"
+      vim.fn.mkdir(root .. "/.git", "p")
+      write(source, { "int callback_observer_symbol;" })
+      edit(source)
+
+      eq(1, guard(source))
+      local bufnr = vim.api.nvim_get_current_buf()
+      vim.b.gutentags_root = root
+      vim.b.gutentags_files = { gtags_cscope = c1 }
+      wait_for_trusted_target(bufnr, c1)
+      local state = _G.NvimGutentagsHybridState
+      local record = state.automatic_transitions[bufnr]
+      local observer = state.automatic_observers[bufnr]
+      write(root .. "/GTAGS", { "manual database" })
+      eq(false, adapter.update())
+
+      vim.b.gutentags_files = { gtags_cscope = c2 }
+      if kind == "pending" then
+        state.automatic_observers[bufnr] = {
+          generation = observer.generation + 1,
+          pending = true,
+        }
+      else
+        state.automatic_observers[bufnr] = "malformed"
+      end
+      vim.wait(100)
+      eq("automatic", vim.b.gutentags_hybrid_mode)
+      eq(c1, record.trusted.target)
+      eq(nil, record.candidate)
+      eq({ [c1] = true }, record.targets)
+      if kind == "malformed" then
+        eq(true, record.observer_conflict)
+      end
+      vim.api.nvim_buf_delete(bufnr, { force = true })
+    end
+  end, debug.traceback)
+  vim.env.PATH = old_path
+  if not ok then error(err) end
+end)
+
 test("blocks foreign-root metadata in scheduled observation", function()
   local root = temp_root .. "/foreign-root-observer"
   local foreign_root = temp_root .. "/foreign-root-observer-other"
