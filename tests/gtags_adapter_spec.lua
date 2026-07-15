@@ -739,7 +739,7 @@ test("defers a live manual transition until Gutentags work is quiescent", functi
     eq("automatic", vim.b.gutentags_hybrid_mode)
     eq(root, vim.b.gutentags_root)
     eq(automatic_files, vim.b.gutentags_files)
-    assert(notifications[#notifications]:find("稍后重试", 1, true))
+    assert(notifications[#notifications]:find("try again shortly", 1, true))
     vim.api.nvim_exec_autocmds("BufWritePost", { buffer = bufnr })
     eq({ gutentags = 1, user = 1 }, writes)
 
@@ -1143,7 +1143,7 @@ test("reports an empty query without opening fzf", function()
 
   eq(false, adapter.find("g"))
   eq(before_fzf, fzf_calls)
-  assert(notifications[#notifications].message:find("未找到", 1, true))
+  assert(notifications[#notifications].message:find("No matches", 1, true))
 end)
 
 test("jumps directly when a query has one valid location", function()
@@ -1208,10 +1208,10 @@ test("reports a nonzero query exit status as a backend failure", function()
     eq(before_calls + 1, query_calls)
     local notification = notifications[#notifications]
     eq(vim.log.levels.ERROR, notification.level)
-    assert(notification.message:find("查询失败", 1, true))
+    assert(notification.message:find("query failed", 1, true))
     assert(notification.message:find("7", 1, true))
     assert(notification.message:find(root .. "/GTAGS", 1, true))
-    eq(nil, notification.message:find("未找到", 1, true))
+    eq(nil, notification.message:find("No matches", 1, true))
   end, debug.traceback)
   query_shell_error = 0
   set_shell_error(0)
@@ -1230,7 +1230,7 @@ test("rejects invalid query kinds without invoking GscopeFind", function()
   eq(before_notifications + 2, #notifications)
   for index = before_notifications + 1, #notifications do
     eq(vim.log.levels.ERROR, notifications[index].level)
-    assert(notifications[index].message:find("查询类型", 1, true))
+    assert(notifications[index].message:find("query type", 1, true))
   end
 end)
 
@@ -1297,7 +1297,7 @@ test("preserves a manual query lock across adapter reloads", function()
     eq(false, reloaded_adapter.find("g"))
     eq(before_calls, query_calls)
     assert(notifications[#notifications].message:find(
-      "手动索引正在更新", 1, true))
+      "manual index is being updated", 1, true))
   end, debug.traceback)
   shared_state.manual_updates[root] = nil
   if not ok then error(err) end
@@ -1385,7 +1385,7 @@ test("blocks automatic queries while Gutentags is running", function()
   vim.g.test_gutentags_jobs = { "gtags_cscope" }
 
   eq(false, adapter.find("g"))
-  assert(notifications[#notifications].message:find("正在生成或更新", 1, true))
+  assert(notifications[#notifications].message:find("building or updating the index", 1, true))
   vim.g.test_gutentags_jobs = {}
 end)
 
@@ -1401,7 +1401,7 @@ test("rejects automatic queries until Gutentags prepares a database", function()
   eq(before_calls, query_calls)
   local notification = notifications[#notifications]
   eq(vim.log.levels.WARN, notification.level)
-  eq("Gutentags 尚未为当前项目准备数据库", notification.message)
+  eq("Gutentags has not prepared the current project's database yet", notification.message)
 end)
 
 test("reports tools missing from the query action", function()
@@ -1418,10 +1418,20 @@ test("reports tools missing from the query action", function()
 end)
 
 test("installs the existing leader-g query maps", function()
-  for _, suffix in ipairs({ "d", "s", "r", "t", "e", "f", "i" }) do
+  local expected_maps = {
+    d = "GTAGS: Definition",
+    s = "GTAGS: Symbol/References",
+    r = "GTAGS: Callers",
+    t = "GTAGS: Text",
+    e = "GTAGS: Egrep",
+    f = "GTAGS: File",
+    i = "GTAGS: Includes",
+  }
+  for suffix, expected in pairs(expected_maps) do
     local mapping = vim.fn.maparg("<leader>g" .. suffix, "n", false, true)
     assert(type(mapping) == "table" and mapping.desc,
       "missing map <leader>g" .. suffix)
+    eq(expected, mapping.desc)
   end
 end)
 
@@ -1539,7 +1549,7 @@ test("runs one asynchronous global update per manual project", function()
     assert(vim.wait(1000, function()
       return #notifications == before_completion + 1
     end))
-    eq("手动 GTAGS 更新完成: " .. root, notifications[#notifications].message)
+    eq("Manual GTAGS update completed: " .. root, notifications[#notifications].message)
 
     eq(true, adapter.update())
     eq(2, #calls)
@@ -1563,7 +1573,7 @@ test("does not build automatically inside a disabled project", function()
   edit(source)
 
   eq(false, adapter.update())
-  assert(notifications[#notifications].message:find("手动生成 GTAGS", 1, true))
+  assert(notifications[#notifications].message:find("build GTAGS manually first", 1, true))
 end)
 
 test("reports a failed manual global update", function()
@@ -1585,7 +1595,7 @@ test("reports a failed manual global update", function()
     end))
     local notification = notifications[#notifications]
     eq(vim.log.levels.ERROR, notification.level)
-    eq("手动 GTAGS 更新失败 (exit 2): database locked", notification.message)
+    eq("Manual GTAGS update failed (exit 2): database locked", notification.message)
   end, debug.traceback)
   vim.system = old_system
   _G.NvimGutentagsHybridState.manual_updates[root] = nil
@@ -1612,7 +1622,7 @@ test("reports a signal-terminated manual update as a failure", function()
     local notification = notifications[#notifications]
     eq(vim.log.levels.ERROR, notification.level)
     assert(notification.message:find("signal 15", 1, true))
-    eq(nil, notification.message:find("更新完成", 1, true))
+    eq(nil, notification.message:find("update completed", 1, true))
     eq(nil, _G.NvimGutentagsHybridState.manual_updates[root])
   end, debug.traceback)
   vim.system = old_system
@@ -1649,7 +1659,7 @@ test("releases the manual update lock when global fails to start", function()
     eq(2, calls)
     callback({ code = 0, stdout = "", stderr = "" })
     assert(vim.wait(1000, function()
-      return notifications[#notifications].message:find("更新完成", 1, true) ~= nil
+      return notifications[#notifications].message:find("update completed", 1, true) ~= nil
     end))
   end, debug.traceback)
   vim.system = old_system
@@ -1669,7 +1679,7 @@ test("checks gtags only for automatic updates", function()
     eq(false, adapter.update())
     local notification = notifications[#notifications]
     eq(vim.log.levels.ERROR, notification.level)
-    eq("缺少索引命令: gtags", notification.message)
+    eq("Missing indexing command: gtags", notification.message)
     eq(nil, notification.message:find("global", 1, true))
     eq(nil, notification.message:find("gtags-cscope", 1, true))
   end, debug.traceback)
@@ -1684,7 +1694,7 @@ test("installs the leader-g update map", function()
   local ok, err = xpcall(function()
     local mapping = vim.fn.maparg("<leader>gb", "n", false, true)
     assert(type(mapping) == "table" and mapping.desc, "missing map <leader>gb")
-    assert(mapping.desc:find("^GTAGS:"), "unexpected map description")
+    eq("GTAGS: Update index", mapping.desc)
     eq(1, mapping.silent)
 
     current_adapter.update = function()

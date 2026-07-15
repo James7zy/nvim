@@ -336,7 +336,7 @@ local function run()
   assert(not transition_result,
     "active automatic work allowed a live manual transition")
   assert(transition_notifications[#transition_notifications].message:find(
-    "稍后重试", 1, true), "transition failure did not request a retry")
+    "try again shortly", 1, true), "transition failure did not request a retry")
   vim.wait(100)
   assert(vim.b.gutentags_hybrid_mode == "automatic")
   assert(vim.b.gutentags_root == automatic_root)
@@ -586,7 +586,7 @@ local function run()
   assert(failure, "corrupt GTAGS query did not report the backend diagnostic")
   assert(failure:find(corrupt_root .. "/GTAGS", 1, true),
     "corrupt GTAGS diagnostic omitted the database path")
-  assert(not failure:find("未找到", 1, true),
+  assert(not failure:find("No matches", 1, true),
     "corrupt GTAGS query was reported as an empty result")
 
   local disabled_root = temp_root .. "/disabled"

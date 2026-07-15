@@ -445,7 +445,7 @@ local function detach_gutentags_write_hook(bufnr)
 end
 
 local transition_retry_message =
-  "Gutentags 自动索引尚未安全退出；请稍后重试"
+  "Gutentags is still finalizing the automatic index; try again shortly"
 
 local function apply_context(bufnr, context, hook_changes, coordinated)
   local buffer = vim.b[bufnr]
@@ -611,7 +611,7 @@ local function current_context()
   local bufnr = vim.api.nvim_get_current_buf()
   local path = vim.api.nvim_buf_get_name(bufnr)
   if path == "" or vim.bo[bufnr].buftype ~= "" or vim.fn.filereadable(path) ~= 1 then
-    return nil, "当前 buffer 不是可查询的普通文件"
+    return nil, "Current buffer is not a queryable regular file"
   end
   local context = classify(path)
   if vim.b[bufnr].gutentags_hybrid_mode == "automatic"
@@ -631,10 +631,10 @@ local function current_context()
   end
   context.bufnr = bufnr
   if context.mode == "disabled" then
-    return context, context.root .. " 包含 .notags；请先手动生成 GTAGS"
+    return context, context.root .. " contains .notags; build GTAGS manually first"
   end
   if context.mode == "unconfigured" then
-    return context, "找不到项目根；请在项目根创建 .root"
+    return context, "Project root not found; create .root in the project root"
   end
   return context
 end
@@ -672,9 +672,9 @@ end
 
 local function setup_keymaps()
   local maps = {
-    d = { "g", "定义" }, s = { "s", "符号/引用" }, r = { "c", "调用者" },
-    t = { "t", "文本" }, e = { "e", "egrep" }, f = { "f", "文件" },
-    i = { "i", "include" },
+    d = { "g", "Definition" }, s = { "s", "Symbol/References" }, r = { "c", "Callers" },
+    t = { "t", "Text" }, e = { "e", "Egrep" }, f = { "f", "File" },
+    i = { "i", "Includes" },
   }
   for suffix, value in pairs(maps) do
     vim.keymap.set("n", "<leader>g" .. suffix, function()
@@ -683,12 +683,12 @@ local function setup_keymaps()
   end
   vim.keymap.set("n", "<leader>gb", function()
     require("gtags_adapter").update()
-  end, { silent = true, desc = "GTAGS: 更新索引" })
+  end, { silent = true, desc = "GTAGS: Update index" })
 end
 
 function M.find(kind)
   if not query_kinds[kind] then
-    notify("不支持的 GTAGS 查询类型: " .. tostring(kind), vim.log.levels.ERROR)
+    notify("Unsupported GTAGS query type: " .. tostring(kind), vim.log.levels.ERROR)
     return false
   end
   local context, context_error = current_context()
@@ -702,33 +702,33 @@ function M.find(kind)
   end
   if context.mode == "automatic"
       and (type(context.database) ~= "string" or context.database == "") then
-    notify("Gutentags 尚未为当前项目准备数据库", vim.log.levels.WARN)
+    notify("Gutentags has not prepared the current project's database yet", vim.log.levels.WARN)
     return false
   end
   local missing = missing_tools({ "global", "gtags-cscope" })
   if #missing > 0 then
-    notify("缺少查询命令: " .. table.concat(missing, ", "), vim.log.levels.ERROR)
+    notify("Missing query commands: " .. table.concat(missing, ", "), vim.log.levels.ERROR)
     return false
   end
   if context.mode == "automatic" and automatic_update_running(context.bufnr) then
-    notify("Gutentags 正在生成或更新索引，请稍后再查询", vim.log.levels.WARN)
+    notify("Gutentags is building or updating the index; try the query again shortly", vim.log.levels.WARN)
     return false
   end
   if context.mode == "manual" and manual_updates[context.root] then
-    notify("当前手动索引正在更新，请稍后再查询", vim.log.levels.WARN)
+    notify("The manual index is being updated; try the query again shortly", vim.log.levels.WARN)
     return false
   end
   if vim.fn.filereadable(context.database) ~= 1 then
-    notify("GTAGS 数据库尚未就绪: " .. context.database, vim.log.levels.WARN)
+    notify("GTAGS database is not ready: " .. context.database, vim.log.levels.WARN)
     return false
   end
   local term = query_term(kind)
   if term == "" then
-    notify("光标下没有可查询的符号", vim.log.levels.WARN)
+    notify("No queryable symbol under the cursor", vim.log.levels.WARN)
     return false
   end
   if vim.fn.exists(":GscopeFind") ~= 2 then
-    notify("GscopeFind 命令不可用", vim.log.levels.ERROR)
+    notify("GscopeFind command is unavailable", vim.log.levels.ERROR)
     return false
   end
 
@@ -737,20 +737,20 @@ function M.find(kind)
   }, {})
   local shell_error = vim.v.shell_error
   if not ok then
-    notify("GTAGS 查询失败；数据库: " .. context.database .. "；请查看 :messages",
+    notify("GTAGS query failed; database: " .. context.database .. "; see :messages",
       vim.log.levels.ERROR)
     return false
   end
   if shell_error ~= 0 then
-    notify("GTAGS 查询失败（退出码 " .. shell_error .. "）；数据库: "
-      .. context.database .. "；请查看 :messages", vim.log.levels.ERROR)
+    notify("GTAGS query failed (exit " .. shell_error .. "); database: "
+      .. context.database .. "; see :messages", vim.log.levels.ERROR)
     return false
   end
 
   local locations, errors = split_quickfix(vim.fn.getqflist())
   if #locations == 0 then
-    local detail = errors[1] or ("未找到: " .. term)
-    notify(detail .. "；数据库: " .. context.database, vim.log.levels.WARN)
+    local detail = errors[1] or ("No matches: " .. term)
+    notify(detail .. "; database: " .. context.database, vim.log.levels.WARN)
     return false
   end
 
@@ -764,12 +764,12 @@ function M.find(kind)
   end
   local loaded, fzf = pcall(require, "fzf-lua")
   if not loaded or type(fzf) ~= "table" or type(fzf.quickfix) ~= "function" then
-    notify("fzf-lua 不可用", vim.log.levels.ERROR)
+    notify("fzf-lua is unavailable", vim.log.levels.ERROR)
     return false
   end
   local opened = pcall(fzf.quickfix, { valid_only = true })
   if not opened then
-    notify("fzf-lua quickfix 打开失败", vim.log.levels.ERROR)
+    notify("Failed to open the fzf-lua quickfix picker", vim.log.levels.ERROR)
     return false
   end
   return true
@@ -792,32 +792,32 @@ function M.update()
   if context.mode == "automatic" then
     local missing = missing_tools({ "gtags" })
     if #missing > 0 then
-      notify("缺少索引命令: gtags", vim.log.levels.ERROR)
+      notify("Missing indexing command: gtags", vim.log.levels.ERROR)
       return false
     end
     if vim.fn.exists(":GutentagsUpdate") ~= 2 then
-      notify("当前 buffer 没有 GutentagsUpdate 命令", vim.log.levels.ERROR)
+      notify("Current buffer has no GutentagsUpdate command", vim.log.levels.ERROR)
       return false
     end
     local ok, command_error = pcall(vim.api.nvim_cmd, {
       cmd = "GutentagsUpdate",
     }, {})
     if not ok then
-      notify("Gutentags 更新启动失败: " .. tostring(command_error), vim.log.levels.ERROR)
+      notify("Failed to start Gutentags update: " .. tostring(command_error), vim.log.levels.ERROR)
       return false
     end
     return true
   end
   if context.mode ~= "manual" then
-    notify(context_error or "请先手动生成 GTAGS", vim.log.levels.WARN)
+    notify(context_error or "Build GTAGS manually first", vim.log.levels.WARN)
     return false
   end
   if vim.fn.executable("global") ~= 1 then
-    notify("缺少索引更新命令: global", vim.log.levels.ERROR)
+    notify("Missing index update command: global", vim.log.levels.ERROR)
     return false
   end
   if manual_updates[context.root] then
-    notify("当前手动索引已经在更新", vim.log.levels.WARN)
+    notify("The manual index is already being updated", vim.log.levels.WARN)
     return false
   end
 
@@ -831,19 +831,19 @@ function M.update()
     vim.schedule(function()
       local signal = result.signal or 0
       if result.code == 0 and signal == 0 then
-        notify("手动 GTAGS 更新完成: " .. context.root)
+        notify("Manual GTAGS update completed: " .. context.root)
       else
         local stderr = vim.trim(result.stderr or "")
         local status = signal ~= 0 and ("signal " .. signal)
           or ("exit " .. result.code)
-        notify("手动 GTAGS 更新失败 (" .. status .. ")"
+        notify("Manual GTAGS update failed (" .. status .. ")"
           .. (stderr ~= "" and (": " .. stderr) or ""), vim.log.levels.ERROR)
       end
     end)
   end)
   if not launched then
     manual_updates[context.root] = nil
-    notify("手动 GTAGS 更新启动失败: " .. tostring(launch_error), vim.log.levels.ERROR)
+    notify("Failed to start manual GTAGS update: " .. tostring(launch_error), vim.log.levels.ERROR)
     return false
   end
   return true
