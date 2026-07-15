@@ -15,15 +15,6 @@ return {
       return
     end
 
-    local grep_rg_opts = table.concat({
-      "--column --line-number --no-heading --color=always --smart-case",
-      "--max-columns=200 --max-filesize=1M",
-      "-g '!GTAGS' -g '!GRTAGS' -g '!GPATH' -g '!GSYMS'",
-      "-g '!*.o' -g '!*.cmd' -g '!*.ko' -g '!*.a'",
-      "-g '!vmlinux*' -g '!*.bin' -g '!*.elf' -g '!*.dtb'",
-      "-e",
-    }, " ")
-
     fzf.setup({
       -- 窗口：输入框在下方（--layout=reverse 是 fzf 默认，prompt 在底、结果向上）
       fzf_opts = { ["--layout"] = "reverse" },
@@ -59,7 +50,14 @@ return {
       grep = {
         -- 跟 telescope 的 grep_args 对齐：跳过超长行 + 不搜超大文件 + 排除
         -- GTAGS 等二进制（没放 .ignore 的仓库的兜底防护）。
-        rg_opts = grep_rg_opts,
+        rg_opts = table.concat({
+          "--column --line-number --no-heading --color=always --smart-case",
+          "--max-columns=200 --max-filesize=1M",
+          "-g '!GTAGS' -g '!GRTAGS' -g '!GPATH' -g '!GSYMS'",
+          "-g '!*.o' -g '!*.cmd' -g '!*.ko' -g '!*.a'",
+          "-g '!vmlinux*' -g '!*.bin' -g '!*.elf' -g '!*.dtb'",
+          "-e",
+        }, " "),
       },
     })
 
@@ -76,9 +74,9 @@ return {
 
     -- frb：光标下单词，精确（词边界）。grep_cword + --word-regexp
     map("<leader>frb", function()
-      fzf.grep_cword({
-        rg_opts = grep_rg_opts:gsub(" %-e$", " --word-regexp -e"),
-      })
+      fzf.grep_cword({ rg_opts =
+        "--column --line-number --no-heading --color=always --smart-case "
+        .. "--max-columns=200 --max-filesize=1M --word-regexp -e" })
     end, "fzf: 光标词精确搜索")
 
     -- frc：光标下单词，正则/模糊（不加词边界）
